@@ -5,6 +5,7 @@ set(ASAN_TESTSUITES)
 macro(get_bits_for_arch arch bits)
   if (${arch} STREQUAL "arm" OR
       ${arch} STREQUAL "i386" OR
+      ${arch} STREQUAL "i686" OR
       ${arch} STREQUAL "mips")
     set(bits 32)
   elseif (${arch} STREQUAL "aarch64" OR
@@ -19,7 +20,7 @@ endmacro()
 # TODO: merge with non-ANDROID case
 if(ANDROID)
   foreach(arch ${ASAN_SUPPORTED_ARCH})
-    set(ASAN_TEST_TARGET_CC ${COMPILER_RT_TEST_COMPILER})
+    set(ASAN_TEST_TARGET_CC ${CMAKE_CXX_COMPILER})
     set(ASAN_TEST_TARGET_CFLAGS ${COMPILER_RT_TEST_COMPILER_CFLAGS})
     set(ASAN_TEST_CONFIG_SUFFIX "-${arch}-android")
     get_bits_for_arch(${arch} ASAN_TEST_BITS)
