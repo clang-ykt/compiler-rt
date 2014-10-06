@@ -28,16 +28,24 @@
 // tell linker it can break up file at label boundaries
 #define FILE_LEVEL_DIRECTIVE .subsections_via_symbols
 #define SYMBOL_IS_FUNC(name)
+#if __ARM_ARCH_ISA_THUMB == 2
+#define THUMB_FUNC .thumb_func
+#endif
+
 #elif defined(__ELF__)
+
 #define HIDDEN(name) .hidden name
 #define LOCAL_LABEL(name) .L_##name
+#define THUMB_FUNC
 #define FILE_LEVEL_DIRECTIVE
 #if defined(__arm__)
 #define SYMBOL_IS_FUNC(name) .type name,%function
 #else
 #define SYMBOL_IS_FUNC(name) .type name,@function
 #endif
-#else
+
+#else // !__APPLE__ && !__ELF__
+
 #define HIDDEN_DIRECTIVE(name)
 #define LOCAL_LABEL(name) .L ## name
 #define SYMBOL_IS_FUNC(name)                                                   \
@@ -45,6 +53,7 @@
     .scl 2 SEPARATOR                                                           \
     .type 32 SEPARATOR                                                         \
   .endef
+#define THUMB_FUNC
 #define FILE_LEVEL_DIRECTIVE
 #endif
 
@@ -94,6 +103,14 @@
 #define DEFINE_COMPILERRT_FUNCTION(name)                                       \
   FILE_LEVEL_DIRECTIVE SEPARATOR                                               \
   .globl SYMBOL_NAME(name) SEPARATOR                                           \
+  SYMBOL_IS_FUNC(SYMBOL_NAME(name)) SEPARATOR                                  \
+  DECLARE_SYMBOL_VISIBILITY(name)                                              \
+  SYMBOL_NAME(name):
+
+#define DEFINE_COMPILERRT_THUMB_FUNCTION(name)                                 \
+  FILE_LEVEL_DIRECTIVE SEPARATOR                                               \
+  .globl SYMBOL_NAME(name) SEPARATOR                                           \
+  THUMB_FUNC                                                                   \
   SYMBOL_IS_FUNC(SYMBOL_NAME(name)) SEPARATOR                                  \
   DECLARE_SYMBOL_VISIBILITY(name)                                              \
   SYMBOL_NAME(name):
