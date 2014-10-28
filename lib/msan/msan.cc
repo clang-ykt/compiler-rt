@@ -187,7 +187,7 @@ static void InitializeFlags(Flags *f, const char *options) {
   ParseFlagsFromString(f, options);
 }
 
-void GetStackTrace(StackTrace *stack, uptr max_s, uptr pc, uptr bp,
+void GetStackTrace(BufferedStackTrace *stack, uptr max_s, uptr pc, uptr bp,
                    bool request_fast_unwind) {
   MsanThread *t = GetCurrentThread();
   if (!t || !StackTrace::WillUseFastUnwind(request_fast_unwind)) {
@@ -280,7 +280,7 @@ u32 ChainOrigin(u32 id, StackTrace *stack) {
     }
   }
 
-  StackDepotHandle h = StackDepotPut_WithHandle(stack->trace, stack->size);
+  StackDepotHandle h = StackDepotPut_WithHandle(*stack);
   if (!h.valid()) return id;
 
   if (flags()->origin_history_per_stack_limit > 0) {
