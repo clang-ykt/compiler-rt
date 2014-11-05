@@ -59,27 +59,16 @@ bool WEAK OnReport(const ReportDesc *rep, bool suppressed) {
 static void StackStripMain(ReportStack *stack) {
   ReportStack *last_frame = 0;
   ReportStack *last_frame2 = 0;
-  const char *prefix = "__interceptor_";
-  uptr prefix_len = internal_strlen(prefix);
-  const char *path_prefix = common_flags()->strip_path_prefix;
-  uptr path_prefix_len = internal_strlen(path_prefix);
-  char *pos;
   for (ReportStack *ent = stack; ent; ent = ent->next) {
-    if (ent->func && 0 == internal_strncmp(ent->func, prefix, prefix_len))
-      ent->func += prefix_len;
-    if (ent->file && (pos = internal_strstr(ent->file, path_prefix)))
-      ent->file = pos + path_prefix_len;
-    if (ent->file && ent->file[0] == '.' && ent->file[1] == '/')
-      ent->file += 2;
     last_frame2 = last_frame;
     last_frame = ent;
   }
 
   if (last_frame2 == 0)
     return;
-  const char *last = last_frame->func;
+  const char *last = last_frame->info.function;
 #ifndef TSAN_GO
-  const char *last2 = last_frame2->func;
+  const char *last2 = last_frame2->info.function;
   // Strip frame above 'main'
   if (last2 && 0 == internal_strcmp(last2, "main")) {
     last_frame2->next = 0;
@@ -133,10 +122,10 @@ static ReportStack *SymbolizeStack(StackTrace trace) {
     CHECK_NE(ent, 0);
     ReportStack *last = ent;
     while (last->next) {
-      last->pc = pc;  // restore original pc for report
+      last->info.address = pc;  // restore original pc for report
       last = last->next;
     }
-    last->pc = pc;  // restore original pc for report
+    last->info.address = pc;  // restore original pc for report
     last->next = stack;
     stack = ent;
   }
@@ -314,13 +303,11 @@ void ScopedReport::AddLocation(uptr addr, uptr size) {
   int creat_tid = -1;
   u32 creat_stack = 0;
   if (FdLocation(addr, &fd, &creat_tid, &creat_stack)) {
-    void *mem = internal_alloc(MBlockReportLoc, sizeof(ReportLocation));
-    ReportLocation *loc = new(mem) ReportLocation();
-    rep_->locs.PushBack(loc);
-    loc->type = ReportLocationFD;
+    ReportLocation *loc = ReportLocation::New(ReportLocationFD);
     loc->fd = fd;
     loc->tid = creat_tid;
     loc->stack = SymbolizeStackId(creat_stack);
+    rep_->locs.PushBack(loc);
     ThreadContext *tctx = FindThreadByUidLocked(creat_tid);
     if (tctx)
       AddThread(tctx);
@@ -335,33 +322,25 @@ void ScopedReport::AddLocation(uptr addr, uptr size) {
   }
   if (b != 0) {
     ThreadContext *tctx = FindThreadByTidLocked(b->tid);
-    void *mem = internal_alloc(MBlockReportLoc, sizeof(ReportLocation));
-    ReportLocation *loc = new(mem) ReportLocation();
-    rep_->locs.PushBack(loc);
-    loc->type = ReportLocationHeap;
-    loc->addr = (uptr)allocator()->GetBlockBegin((void*)addr);
-    loc->size = b->siz;
+    ReportLocation *loc = ReportLocation::New(ReportLocationHeap);
+    loc->heap_chunk_start = (uptr)allocator()->GetBlockBegin((void *)addr);
+    loc->heap_chunk_size = b->siz;
     loc->tid = tctx ? tctx->tid : b->tid;
-    loc->name = 0;
-    loc->file = 0;
-    loc->line = 0;
-    loc->stack = 0;
     loc->stack = SymbolizeStackId(b->stk);
+    rep_->locs.PushBack(loc);
     if (tctx)
       AddThread(tctx);
     return;
   }
   bool is_stack = false;
   if (ThreadContext *tctx = IsThreadStackOrTls(addr, &is_stack)) {
-    void *mem = internal_alloc(MBlockReportLoc, sizeof(ReportLocation));
-    ReportLocation *loc = new(mem) ReportLocation();
-    rep_->locs.PushBack(loc);
-    loc->type = is_stack ? ReportLocationStack : ReportLocationTLS;
+    ReportLocation *loc =
+        ReportLocation::New(is_stack ? ReportLocationStack : ReportLocationTLS);
     loc->tid = tctx->tid;
+    rep_->locs.PushBack(loc);
     AddThread(tctx);
   }
-  ReportLocation *loc = SymbolizeData(addr);
-  if (loc) {
+  if (ReportLocation *loc = SymbolizeData(addr)) {
     loc->suppressable = true;
     rep_->locs.PushBack(loc);
     return;
@@ -569,10 +548,13 @@ static bool IsFiredSuppression(Context *ctx,
 }
 
 bool FrameIsInternal(const ReportStack *frame) {
-  return frame != 0 && frame->file != 0
-      && (internal_strstr(frame->file, "tsan_interceptors.cc") ||
-          internal_strstr(frame->file, "sanitizer_common_interceptors.inc") ||
-          internal_strstr(frame->file, "tsan_interface_"));
+  if (frame == 0)
+    return false;
+  const char *file = frame->info.file;
+  return file != 0 &&
+         (internal_strstr(file, "tsan_interceptors.cc") ||
+          internal_strstr(file, "sanitizer_common_interceptors.inc") ||
+          internal_strstr(file, "tsan_interface_"));
 }
 
 static bool RaceBetweenAtomicAndFree(ThreadState *thr) {
