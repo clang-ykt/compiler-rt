@@ -18,6 +18,7 @@ set(ASAN_SOURCES
   asan_rtl.cc
   asan_stack.cc
   asan_stats.cc
+  asan_suppressions.cc
   asan_thread.cc
   asan_win.cc)
 
@@ -28,10 +29,6 @@ set(ASAN_PREINIT_SOURCES
   asan_preinit.cc)
 
 include_directories(..)
-
-if(ANDROID)
-  include_directories(${COMPILER_RT_EXTRA_ANDROID_HEADERS})
-endif()
 
 set(ASAN_CFLAGS ${SANITIZER_COMMON_CFLAGS})
 append_no_rtti_flag(ASAN_CFLAGS)
@@ -139,9 +136,9 @@ else()
       add_dependencies(asan clang_rt.asan-preinit-${arch})
 
       if (WIN32)
-         set(SHARED_ASAN_NAME clang_rt.asan_dynamic-${arch}${COMPILER_RT_OS_SUFFIX})
+        set(SHARED_ASAN_NAME clang_rt.asan_dynamic-${arch}${COMPILER_RT_OS_SUFFIX})
       else()
-         set(SHARED_ASAN_NAME clang_rt.asan-${arch}${COMPILER_RT_OS_SUFFIX})
+        set(SHARED_ASAN_NAME clang_rt.asan-${arch}${COMPILER_RT_OS_SUFFIX})
       endif()
 
       add_compiler_rt_runtime(clang_rt.asan-dynamic-${arch} ${arch} SHARED

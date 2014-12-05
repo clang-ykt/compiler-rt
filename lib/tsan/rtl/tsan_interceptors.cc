@@ -648,7 +648,8 @@ TSAN_INTERCEPTOR(int, memcmp, const void *s1, const void *s2, uptr n) {
   int res = 0;
   uptr len = 0;
   for (; len < n; len++) {
-    if ((res = ((unsigned char*)s1)[len] - ((unsigned char*)s2)[len]))
+    if ((res = ((const unsigned char *)s1)[len] -
+               ((const unsigned char *)s2)[len]))
       break;
   }
   MemoryAccessRange(thr, pc, (uptr)s1, len < n ? len + 1 : n, false);
@@ -1799,9 +1800,16 @@ TSAN_INTERCEPTOR(uptr, fwrite, const void *p, uptr size, uptr nmemb, void *f) {
   return REAL(fwrite)(p, size, nmemb, f);
 }
 
+static void FlushStreams() {
+  // Flushing all the streams here may freeze the process if a child thread is
+  // performing file stream operations at the same time.
+  REAL(fflush)(stdout);
+  REAL(fflush)(stderr);
+}
+
 TSAN_INTERCEPTOR(void, abort, int fake) {
   SCOPED_TSAN_INTERCEPTOR(abort, fake);
-  REAL(fflush)(0);
+  FlushStreams();
   REAL(abort)(fake);
 }
 
@@ -2130,7 +2138,7 @@ TSAN_INTERCEPTOR(int, vfork, int fake) {
 
 static int OnExit(ThreadState *thr) {
   int status = Finalize(thr);
-  REAL(fflush)(0);
+  FlushStreams();
   return status;
 }
 
@@ -2366,10 +2374,7 @@ static void finalize(void *arg) {
   ThreadState *thr = cur_thread();
   int status = Finalize(thr);
   // Make sure the output is not lost.
-  // Flushing all the streams here may freeze the process if a child thread is
-  // performing file stream operations at the same time.
-  REAL(fflush)(stdout);
-  REAL(fflush)(stderr);
+  FlushStreams();
   if (status)
     REAL(_exit)(status);
 }
