@@ -52,7 +52,6 @@ struct Flags {
   bool print_stats;
   bool print_legend;
   bool atexit;
-  bool allow_reexec;
   bool print_full_thread_history;
   bool poison_heap;
   bool poison_partial;
@@ -72,7 +71,8 @@ extern Flags asan_flags_dont_use_directly;
 inline Flags *flags() {
   return &asan_flags_dont_use_directly;
 }
-void InitializeFlags(Flags *f, const char *env);
+void InitializeFlags(Flags *f);
+void ParseFlagsFromString(Flags *f, const char *str);
 
 }  // namespace __asan
 

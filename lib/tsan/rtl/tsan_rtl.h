@@ -52,7 +52,7 @@
 
 namespace __tsan {
 
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
 struct MapUnmapCallback;
 typedef SizeClassAllocator64<kHeapMemBeg, kHeapMemEnd - kHeapMemBeg, 0,
     DefaultSizeClassMap, MapUnmapCallback> PrimaryAllocator;
@@ -332,7 +332,7 @@ struct ThreadState {
   int ignore_reads_and_writes;
   int ignore_sync;
   // Go does not support ignores.
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
   IgnoreSet mop_ignore_set;
   IgnoreSet sync_ignore_set;
 #endif
@@ -345,7 +345,7 @@ struct ThreadState {
   u64 racy_state[2];
   MutexSet mset;
   ThreadClock clock;
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
   AllocatorCache alloc_cache;
   InternalAllocatorCache internal_alloc_cache;
   Vector<JmpBuf> jmp_bufs;
@@ -376,7 +376,7 @@ struct ThreadState {
   DenseSlabAllocCache sync_cache;
   DenseSlabAllocCache clock_cache;
 
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
   u32 last_sleep_stack_id;
   ThreadClock last_sleep_clock;
 #endif
@@ -391,7 +391,7 @@ struct ThreadState {
                        uptr tls_addr, uptr tls_size);
 };
 
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
 __attribute__((tls_model("initial-exec")))
 extern THREADLOCAL char cur_thread_placeholder[];
 INLINE ThreadState *cur_thread() {
@@ -481,13 +481,13 @@ extern Context *ctx;  // The one and the only global runtime context.
 
 struct ScopedIgnoreInterceptors {
   ScopedIgnoreInterceptors() {
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
     cur_thread()->ignore_interceptors++;
 #endif
   }
 
   ~ScopedIgnoreInterceptors() {
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
     cur_thread()->ignore_interceptors--;
 #endif
   }
@@ -685,7 +685,7 @@ void AcquireReleaseImpl(ThreadState *thr, uptr pc, SyncClock *c);
 // The trick is that the call preserves all registers and the compiler
 // does not treat it as a call.
 // If it does not work for you, use normal call.
-#if TSAN_DEBUG == 0
+#if !SANITIZER_DEBUG
 // The caller may not create the stack frame for itself at all,
 // so we create a reserve stack frame for it (1024b must be enough).
 #define HACKY_CALL(f) \
@@ -717,7 +717,7 @@ void ALWAYS_INLINE TraceAddEvent(ThreadState *thr, FastState fs,
   StatInc(thr, StatEvents);
   u64 pos = fs.GetTracePos();
   if (UNLIKELY((pos % kTracePartSize) == 0)) {
-#ifndef TSAN_GO
+#ifndef SANITIZER_GO
     HACKY_CALL(__tsan_trace_switch);
 #else
     TraceSwitch(thr);

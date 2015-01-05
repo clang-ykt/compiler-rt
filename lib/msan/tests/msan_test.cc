@@ -27,7 +27,6 @@
 #include <stdio.h>
 #include <wchar.h>
 #include <math.h>
-#include <malloc.h>
 
 #include <arpa/inet.h>
 #include <dlfcn.h>
@@ -43,19 +42,25 @@
 #include <sys/resource.h>
 #include <sys/ioctl.h>
 #include <sys/statvfs.h>
-#include <sys/sysinfo.h>
 #include <sys/utsname.h>
 #include <sys/mman.h>
-#include <sys/vfs.h>
 #include <dirent.h>
 #include <pwd.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <wordexp.h>
-#include <mntent.h>
-#include <netinet/ether.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+
+#if !defined(__FreeBSD__)
+# include <malloc.h>
+# include <sys/sysinfo.h>
+# include <sys/vfs.h>
+# include <mntent.h>
+# include <netinet/ether.h>
+#else
+# include <netinet/in.h>
+#endif
 
 #if defined(__i386__) || defined(__x86_64__)
 # include <emmintrin.h>
@@ -973,7 +978,6 @@ TEST(MemorySanitizer, recvmsg) {
   ASSERT_EQ(0, res);
   ASSERT_EQ(sizeof(client_sai), sz);
 
-  
   const char *s = "message text";
   struct iovec iov;
   iov.iov_base = (void *)s;
@@ -1538,55 +1542,74 @@ TEST(MemorySanitizer, strncat_overflow) {  // NOLINT
   EXPECT_POISONED(a[7]);
 }
 
-#define TEST_STRTO_INT(func_name)          \
-  TEST(MemorySanitizer, func_name) {       \
-    char *e;                               \
-    EXPECT_EQ(1U, func_name("1", &e, 10)); \
-    EXPECT_NOT_POISONED((S8)e);            \
+#define TEST_STRTO_INT(func_name, char_type, str_prefix) \
+  TEST(MemorySanitizer, func_name) {                     \
+    char_type *e;                                        \
+    EXPECT_EQ(1U, func_name(str_prefix##"1", &e, 10));   \
+    EXPECT_NOT_POISONED((S8)e);                          \
   }
 
-#define TEST_STRTO_FLOAT(func_name)     \
-  TEST(MemorySanitizer, func_name) {    \
-    char *e;                            \
-    EXPECT_NE(0, func_name("1.5", &e)); \
-    EXPECT_NOT_POISONED((S8)e);         \
+#define TEST_STRTO_FLOAT(func_name, char_type, str_prefix) \
+  TEST(MemorySanitizer, func_name) {                       \
+    char_type *e;                                          \
+    EXPECT_NE(0, func_name(str_prefix##"1.5", &e));        \
+    EXPECT_NOT_POISONED((S8)e);                            \
   }
 
-#define TEST_STRTO_FLOAT_LOC(func_name)                          \
+#define TEST_STRTO_FLOAT_LOC(func_name, char_type, str_prefix)   \
   TEST(MemorySanitizer, func_name) {                             \
     locale_t loc = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0); \
-    char *e;                                                     \
-    EXPECT_NE(0, func_name("1.5", &e, loc));                     \
+    char_type *e;                                                \
+    EXPECT_NE(0, func_name(str_prefix##"1.5", &e, loc));         \
     EXPECT_NOT_POISONED((S8)e);                                  \
     freelocale(loc);                                             \
   }
 
-#define TEST_STRTO_INT_LOC(func_name)                            \
+#define TEST_STRTO_INT_LOC(func_name, char_type, str_prefix)     \
   TEST(MemorySanitizer, func_name) {                             \
     locale_t loc = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0); \
-    char *e;                                                     \
-    ASSERT_EQ(1U, func_name("1", &e, 10, loc));                  \
+    char_type *e;                                                \
+    ASSERT_EQ(1U, func_name(str_prefix##"1", &e, 10, loc));      \
     EXPECT_NOT_POISONED((S8)e);                                  \
     freelocale(loc);                                             \
   }
 
-TEST_STRTO_INT(strtol)
-TEST_STRTO_INT(strtoll)
-TEST_STRTO_INT(strtoul)
-TEST_STRTO_INT(strtoull)
+TEST_STRTO_INT(strtol, char, )
+TEST_STRTO_INT(strtoll, char, )
+TEST_STRTO_INT(strtoul, char, )
+TEST_STRTO_INT(strtoull, char, )
 
-TEST_STRTO_FLOAT(strtof)
-TEST_STRTO_FLOAT(strtod)
-TEST_STRTO_FLOAT(strtold)
+TEST_STRTO_FLOAT(strtof, char, )
+TEST_STRTO_FLOAT(strtod, char, )
+TEST_STRTO_FLOAT(strtold, char, )
 
-TEST_STRTO_FLOAT_LOC(strtof_l)
-TEST_STRTO_FLOAT_LOC(strtod_l)
-TEST_STRTO_FLOAT_LOC(strtold_l)
+TEST_STRTO_FLOAT_LOC(strtof_l, char, )
+TEST_STRTO_FLOAT_LOC(strtod_l, char, )
+TEST_STRTO_FLOAT_LOC(strtold_l, char, )
 
-TEST_STRTO_INT_LOC(strtol_l)
-TEST_STRTO_INT_LOC(strtoll_l)
-TEST_STRTO_INT_LOC(strtoul_l)
-TEST_STRTO_INT_LOC(strtoull_l)
+TEST_STRTO_INT_LOC(strtol_l, char, )
+TEST_STRTO_INT_LOC(strtoll_l, char, )
+TEST_STRTO_INT_LOC(strtoul_l, char, )
+TEST_STRTO_INT_LOC(strtoull_l, char, )
+
+TEST_STRTO_INT(wcstol, wchar_t, L)
+TEST_STRTO_INT(wcstoll, wchar_t, L)
+TEST_STRTO_INT(wcstoul, wchar_t, L)
+TEST_STRTO_INT(wcstoull, wchar_t, L)
+
+TEST_STRTO_FLOAT(wcstof, wchar_t, L)
+TEST_STRTO_FLOAT(wcstod, wchar_t, L)
+TEST_STRTO_FLOAT(wcstold, wchar_t, L)
+
+TEST_STRTO_FLOAT_LOC(wcstof_l, wchar_t, L)
+TEST_STRTO_FLOAT_LOC(wcstod_l, wchar_t, L)
+TEST_STRTO_FLOAT_LOC(wcstold_l, wchar_t, L)
+
+TEST_STRTO_INT_LOC(wcstol_l, wchar_t, L)
+TEST_STRTO_INT_LOC(wcstoll_l, wchar_t, L)
+TEST_STRTO_INT_LOC(wcstoul_l, wchar_t, L)
+TEST_STRTO_INT_LOC(wcstoull_l, wchar_t, L)
+
 
 TEST(MemorySanitizer, strtoimax) {
   char *e;
@@ -1602,12 +1625,20 @@ TEST(MemorySanitizer, strtoumax) {
 
 #ifdef __GLIBC__
 extern "C" float __strtof_l(const char *nptr, char **endptr, locale_t loc);
-TEST_STRTO_FLOAT_LOC(__strtof_l)
+TEST_STRTO_FLOAT_LOC(__strtof_l, char, )
 extern "C" double __strtod_l(const char *nptr, char **endptr, locale_t loc);
-TEST_STRTO_FLOAT_LOC(__strtod_l)
+TEST_STRTO_FLOAT_LOC(__strtod_l, char, )
 extern "C" long double __strtold_l(const char *nptr, char **endptr,
                                    locale_t loc);
-TEST_STRTO_FLOAT_LOC(__strtold_l)
+TEST_STRTO_FLOAT_LOC(__strtold_l, char, )
+
+extern "C" float __wcstof_l(const wchar_t *nptr, wchar_t **endptr, locale_t loc);
+TEST_STRTO_FLOAT_LOC(__wcstof_l, wchar_t, L)
+extern "C" double __wcstod_l(const wchar_t *nptr, wchar_t **endptr, locale_t loc);
+TEST_STRTO_FLOAT_LOC(__wcstod_l, wchar_t, L)
+extern "C" long double __wcstold_l(const wchar_t *nptr, wchar_t **endptr,
+                                   locale_t loc);
+TEST_STRTO_FLOAT_LOC(__wcstold_l, wchar_t, L)
 #endif  // __GLIBC__
 
 TEST(MemorySanitizer, modf) {

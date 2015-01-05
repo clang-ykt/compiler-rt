@@ -22,13 +22,15 @@ static const char *MaybeCallUbsanDefaultOptions() {
 }
 
 void InitializeCommonFlags() {
-  CommonFlags *cf = common_flags();
-  SetCommonFlagsDefaults(cf);
-  cf->print_summary = false;
+  SetCommonFlagsDefaults();
+  CommonFlags cf;
+  cf.CopyFrom(*common_flags());
+  cf.print_summary = false;
+  OverrideCommonFlags(cf);
   // Override from user-specified string.
-  ParseCommonFlagsFromString(cf, MaybeCallUbsanDefaultOptions());
+  ParseCommonFlagsFromString(MaybeCallUbsanDefaultOptions());
   // Override from environment variable.
-  ParseCommonFlagsFromString(cf, GetEnv("UBSAN_OPTIONS"));
+  ParseCommonFlagsFromString(GetEnv("UBSAN_OPTIONS"));
 }
 
 Flags ubsan_flags;

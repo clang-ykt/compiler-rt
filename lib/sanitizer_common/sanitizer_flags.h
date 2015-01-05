@@ -54,7 +54,10 @@ struct CommonFlags {
   bool intercept_tls_get_addr;
   bool help;
   uptr mmap_limit_mb;
+  uptr hard_rss_limit_mb;
   bool coverage;
+  bool coverage_pcs;
+  bool coverage_bitset;
   bool coverage_direct;
   const char *coverage_dir;
   bool full_address_space;
@@ -63,15 +66,36 @@ struct CommonFlags {
   bool disable_coredump;
   bool symbolize_inline_frames;
   const char *stack_trace_format;
+
+  void SetDefaults();
+  void ParseFromString(const char *str);
+
+  void CopyFrom(const CommonFlags &other);
 };
 
-inline CommonFlags *common_flags() {
-  extern CommonFlags common_flags_dont_use;
+// Functions to get/set global CommonFlags shared by all sanitizer runtimes:
+extern CommonFlags common_flags_dont_use;
+inline const CommonFlags *common_flags() {
   return &common_flags_dont_use;
 }
 
-void SetCommonFlagsDefaults(CommonFlags *f);
-void ParseCommonFlagsFromString(CommonFlags *f, const char *str);
+inline void SetCommonFlagsDefaults() {
+  common_flags_dont_use.SetDefaults();
+}
+
+inline void ParseCommonFlagsFromString(const char *str) {
+  common_flags_dont_use.ParseFromString(str);
+}
+
+// This function can only be used to setup tool-specific overrides for
+// CommonFlags defaults. Generally, it should only be used right after
+// SetCommonFlagsDefaults(), but before ParseCommonFlagsFromString(), and
+// only during the flags initialization (i.e. before they are used for
+// the first time).
+inline void OverrideCommonFlags(const CommonFlags &cf) {
+  common_flags_dont_use.CopyFrom(cf);
+}
+
 void PrintFlagDescriptions();
 
 }  // namespace __sanitizer

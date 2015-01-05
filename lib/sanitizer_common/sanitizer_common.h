@@ -66,6 +66,7 @@ bool MemoryRangeIsAvailable(uptr range_start, uptr range_end);
 void FlushUnneededShadowMemory(uptr addr, uptr size);
 void IncreaseTotalMmap(uptr size);
 void DecreaseTotalMmap(uptr size);
+uptr GetRSS();
 
 // InternalScopedBuffer can be used instead of large stack arrays to
 // keep frame size low.
@@ -128,9 +129,6 @@ void SetLowLevelAllocateCallback(LowLevelAllocateCallback callback);
 
 // IO
 void RawWrite(const char *buffer);
-bool PrintsToTty();
-// Caching version of PrintsToTty(). Not thread-safe.
-bool PrintsToTtyCached();
 bool ColorizeReports();
 void Printf(const char *format, ...);
 void Report(const char *format, ...);
@@ -146,11 +144,33 @@ void SetPrintfAndReportCallback(void (*callback)(const char *));
 
 // Can be used to prevent mixing error reports from different sanitizers.
 extern StaticSpinMutex CommonSanitizerReportMutex;
-void MaybeOpenReportFile();
-extern fd_t report_fd;
-extern bool log_to_file;
-extern char report_path_prefix[kMaxPathLength];
-extern uptr report_fd_pid;
+
+struct ReportFile {
+  void Write(const char *buffer, uptr length);
+  bool PrintsToTty();
+  void SetReportPath(const char *path);
+
+  // Don't use fields directly. They are only declared public to allow
+  // aggregate initialization.
+
+  // Protects fields below.
+  StaticSpinMutex *mu;
+  // Opened file descriptor. Defaults to stderr. It may be equal to
+  // kInvalidFd, in which case new file will be opened when necessary.
+  fd_t fd;
+  // Path prefix of report file, set via __sanitizer_set_report_path.
+  char path_prefix[kMaxPathLength];
+  // Full path to report, obtained as <path_prefix>.PID
+  char full_path[kMaxPathLength];
+  // PID of the process that opened fd. If a fork() occurs,
+  // the PID of child will be different from fd_pid.
+  uptr fd_pid;
+
+ private:
+  void ReopenIfNecessary();
+};
+extern ReportFile report_file;
+
 extern uptr stoptheworld_tracer_pid;
 extern uptr stoptheworld_tracer_ppid;
 
@@ -194,9 +214,12 @@ void PrepareForSandboxing(__sanitizer_sandbox_arguments *args);
 void CovPrepareForSandboxing(__sanitizer_sandbox_arguments *args);
 void SetSandboxingCallback(void (*f)());
 
-void CovUpdateMapping(uptr caller_pc = 0);
+void CoverageUpdateMapping();
 void CovBeforeFork();
 void CovAfterFork(int child_pid);
+
+void InitializeCoverage(bool enabled, const char *coverage_dir);
+void ReInitializeCoverage(bool enabled, const char *coverage_dir);
 
 void InitTlsSize();
 uptr GetTlsSize();
@@ -225,6 +248,7 @@ bool SanitizerGetThreadName(char *name, int max_len);
 // to do tool-specific job.
 typedef void (*DieCallbackType)(void);
 void SetDieCallback(DieCallbackType);
+void SetUserDieCallback(DieCallbackType);
 DieCallbackType GetDieCallback();
 typedef void (*CheckFailedCallbackType)(const char *, int, const char *,
                                        u64, u64);
@@ -356,14 +380,14 @@ INLINE int ToLower(int c) {
 // small vectors.
 // WARNING: The current implementation supports only POD types.
 template<typename T>
-class InternalMmapVector {
+class InternalMmapVectorNoCtor {
  public:
-  explicit InternalMmapVector(uptr initial_capacity) {
+  void Initialize(uptr initial_capacity) {
     capacity_ = Max(initial_capacity, (uptr)1);
     size_ = 0;
-    data_ = (T *)MmapOrDie(capacity_ * sizeof(T), "InternalMmapVector");
+    data_ = (T *)MmapOrDie(capacity_ * sizeof(T), "InternalMmapVectorNoCtor");
   }
-  ~InternalMmapVector() {
+  void Destroy() {
     UnmapOrDie(data_, capacity_ * sizeof(T));
   }
   T &operator[](uptr i) {
@@ -414,13 +438,22 @@ class InternalMmapVector {
     UnmapOrDie(old_data, capacity_ * sizeof(T));
     capacity_ = new_capacity;
   }
-  // Disallow evil constructors.
-  InternalMmapVector(const InternalMmapVector&);
-  void operator=(const InternalMmapVector&);
 
   T *data_;
   uptr capacity_;
   uptr size_;
+};
+
+template<typename T>
+class InternalMmapVector : public InternalMmapVectorNoCtor<T> {
+ public:
+  explicit InternalMmapVector(uptr initial_capacity) {
+    InternalMmapVectorNoCtor<T>::Initialize(initial_capacity);
+  }
+  ~InternalMmapVector() { InternalMmapVectorNoCtor<T>::Destroy(); }
+  // Disallow evil constructors.
+  InternalMmapVector(const InternalMmapVector&);
+  void operator=(const InternalMmapVector&);
 };
 
 // HeapSort for arrays and InternalMmapVector.
@@ -535,6 +568,10 @@ INLINE void AndroidLogWrite(const char *buffer_unused) {}
 INLINE void GetExtraActivationFlags(char *buf, uptr size) { *buf = '\0'; }
 INLINE void SanitizerInitializeUnwinder() {}
 #endif
+
+void *internal_start_thread(void(*func)(void*), void *arg);
+void internal_join_thread(void *th);
+void MaybeStartBackgroudThread();
 
 // Make the compiler think that something is going on there.
 // Use this inside a loop that looks like memset/memcpy/etc to prevent the

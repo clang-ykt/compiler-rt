@@ -109,6 +109,10 @@ uptr internal_readlink(const char *path, char *buf, uptr bufsize) {
   return readlink(path, buf, bufsize);
 }
 
+uptr internal_unlink(const char *path) {
+  return unlink(path);
+}
+
 uptr internal_sched_yield() {
   return sched_yield();
 }
@@ -298,7 +302,11 @@ MacosVersion GetMacosVersionInternal() {
         case '2': return MACOS_VERSION_MOUNTAIN_LION;
         case '3': return MACOS_VERSION_MAVERICKS;
         case '4': return MACOS_VERSION_YOSEMITE;
-        default: return MACOS_VERSION_UNKNOWN;
+        default:
+          if (IsDigit(version[1]))
+            return MACOS_VERSION_UNKNOWN_NEWER;
+          else
+            return MACOS_VERSION_UNKNOWN;
       }
     }
     default: return MACOS_VERSION_UNKNOWN;
@@ -316,6 +324,13 @@ MacosVersion GetMacosVersion() {
   }
   return result;
 }
+
+uptr GetRSS() {
+  return 0;
+}
+
+void *internal_start_thread(void (*func)(void *arg), void *arg) { return 0; }
+void internal_join_thread(void *th) { }
 
 }  // namespace __sanitizer
 
