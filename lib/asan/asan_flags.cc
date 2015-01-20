@@ -79,14 +79,10 @@ void InitializeFlags(Flags *f) {
   // Override from user-specified string.
   const char *default_options = MaybeCallAsanDefaultOptions();
   parser.ParseString(default_options);
-  VReport(1, "Using the defaults from __asan_default_options: %s\n",
-          MaybeCallAsanDefaultOptions());
 
   // Override from command line.
-  if (const char *env = GetEnv("ASAN_OPTIONS")) {
-    parser.ParseString(env);
-    VReport(1, "Parsed ASAN_OPTIONS: %s\n", env);
-  }
+  const char *env = GetEnv("ASAN_OPTIONS");
+  if (env) parser.ParseString(env);
 
   // Let activation flags override current settings. On Android they come
   // from a system property. On other platforms this is no-op.
@@ -94,13 +90,14 @@ void InitializeFlags(Flags *f) {
     char buf[100];
     GetExtraActivationFlags(buf, sizeof(buf));
     parser.ParseString(buf);
-    if (buf[0] != '\0')
-      VReport(1, "Parsed activation flags: %s\n", buf);
   }
 
-  if (common_flags()->help) {
-    parser.PrintFlagDescriptions();
-  }
+  SetVerbosity(common_flags()->verbosity);
+
+  // TODO(eugenis): dump all flags at verbosity>=2?
+  if (Verbosity()) ReportUnrecognizedFlags();
+
+  if (common_flags()->help) parser.PrintFlagDescriptions();
 
   // Flag validation:
   if (!CAN_SANITIZE_LEAKS && common_flags()->detect_leaks) {

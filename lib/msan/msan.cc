@@ -125,8 +125,8 @@ void RegisterMsanFlags(FlagParser *parser, Flags *f) {
 #include "msan_flags.inc"
 #undef MSAN_FLAG
 
-  FlagHandlerKeepGoing *fh_keep_going =
-      new (INTERNAL_ALLOC) FlagHandlerKeepGoing(&f->halt_on_error);  // NOLINT
+  FlagHandlerKeepGoing *fh_keep_going = new (FlagParser::Alloc)  // NOLINT
+      FlagHandlerKeepGoing(&f->halt_on_error);
   parser->RegisterHandler("keep_going", fh_keep_going,
                           "deprecated, use halt_on_error");
 }
@@ -156,6 +156,10 @@ static void InitializeFlags(Flags *f, const char *options) {
     parser.ParseString(__msan_default_options());
 
   parser.ParseString(options);
+
+  SetVerbosity(common_flags()->verbosity);
+
+  if (Verbosity()) ReportUnrecognizedFlags();
 
   if (common_flags()->help) parser.PrintFlagDescriptions();
 

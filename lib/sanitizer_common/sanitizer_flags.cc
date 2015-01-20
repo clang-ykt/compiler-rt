@@ -45,11 +45,43 @@ void CommonFlags::CopyFrom(const CommonFlags &other) {
   internal_memcpy(this, &other, sizeof(*this));
 }
 
+class FlagHandlerInclude : public FlagHandlerBase {
+  static const uptr kMaxIncludeSize = 1 << 15;
+  FlagParser *parser_;
+
+ public:
+  explicit FlagHandlerInclude(FlagParser *parser) : parser_(parser) {}
+  bool Parse(const char *value) {
+    char *data;
+    uptr data_mapped_size;
+    int err;
+    uptr len =
+      ReadFileToBuffer(value, &data, &data_mapped_size,
+                       Max(kMaxIncludeSize, GetPageSizeCached()), &err);
+    if (!len) {
+      Printf("Failed to read options from '%s': error %d\n", value, err);
+      return false;
+    }
+    parser_->ParseString(data);
+    UnmapOrDie(data, data_mapped_size);
+    return true;
+  }
+};
+
+void RegisterIncludeFlag(FlagParser *parser, CommonFlags *cf) {
+  FlagHandlerInclude *fh_include =
+      new (FlagParser::Alloc) FlagHandlerInclude(parser);  // NOLINT
+  parser->RegisterHandler("include", fh_include,
+                          "read more options from the given file");
+}
+
 void RegisterCommonFlags(FlagParser *parser, CommonFlags *cf) {
 #define COMMON_FLAG(Type, Name, DefaultValue, Description) \
   RegisterFlag(parser, #Name, Description, &cf->Name);
 #include "sanitizer_flags.inc"
 #undef COMMON_FLAG
+
+  RegisterIncludeFlag(parser, cf);
 }
 
 }  // namespace __sanitizer
