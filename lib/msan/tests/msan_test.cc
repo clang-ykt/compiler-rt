@@ -60,6 +60,7 @@
 # include <netinet/ether.h>
 #else
 # include <netinet/in.h>
+# include <sys/uio.h>
 #endif
 
 #if defined(__i386__) || defined(__x86_64__)
@@ -511,9 +512,8 @@ static char *DynRetTestStr;
 
 TEST(MemorySanitizer, DynRet) {
   ReturnPoisoned<S8>();
-  EXPECT_NOT_POISONED(clearenv());
+  EXPECT_NOT_POISONED(atoi("0"));
 }
-
 
 TEST(MemorySanitizer, DynRet1) {
   ReturnPoisoned<S8>();
@@ -569,7 +569,7 @@ TEST(MemorySanitizer, strerror) {
 TEST(MemorySanitizer, strerror_r) {
   errno = 0;
   char buf[1000];
-  char *res = strerror_r(EINVAL, buf, sizeof(buf));
+  char *res = (char*) (size_t) strerror_r(EINVAL, buf, sizeof(buf));
   ASSERT_EQ(0, errno);
   if (!res) res = buf; // POSIX version success.
   EXPECT_NOT_POISONED(strlen(res));
@@ -624,7 +624,7 @@ TEST(MemorySanitizer, readv) {
   ASSERT_GT(fd, 0);
   int sz = readv(fd, iov, 2);
   ASSERT_GE(sz, 0);
-  ASSERT_LT(sz, 5 + 2000);
+  ASSERT_LE(sz, 5 + 2000);
   ASSERT_GT((size_t)sz, iov[0].iov_len);
   EXPECT_POISONED(buf[0]);
   EXPECT_NOT_POISONED(buf[1]);
@@ -648,7 +648,7 @@ TEST(MemorySanitizer, preadv) {
   ASSERT_GT(fd, 0);
   int sz = preadv(fd, iov, 2, 3);
   ASSERT_GE(sz, 0);
-  ASSERT_LT(sz, 5 + 2000);
+  ASSERT_LE(sz, 5 + 2000);
   ASSERT_GT((size_t)sz, iov[0].iov_len);
   EXPECT_POISONED(buf[0]);
   EXPECT_NOT_POISONED(buf[1]);
