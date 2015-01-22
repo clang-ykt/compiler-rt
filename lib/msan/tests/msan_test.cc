@@ -868,8 +868,11 @@ TEST(MemorySanitizer, accept) {
   res = fcntl(connect_socket, F_SETFL, O_NONBLOCK);
   ASSERT_EQ(0, res);
   res = connect(connect_socket, (struct sockaddr *)&sai, sizeof(sai));
-  ASSERT_EQ(-1, res);
-  ASSERT_EQ(EINPROGRESS, errno);
+  // On FreeBSD this connection completes immediately.
+  if (res != 0) {
+    ASSERT_EQ(-1, res);
+    ASSERT_EQ(EINPROGRESS, errno);
+  }
 
   __msan_poison(&sai, sizeof(sai));
   int new_sock = accept(listen_socket, (struct sockaddr *)&sai, &sz);
@@ -1229,6 +1232,16 @@ TEST(MemorySanitizer, confstr) {
   EXPECT_NOT_POISONED(buf2[res - 1]);
   EXPECT_POISONED(buf2[res]);
   ASSERT_EQ(res, strlen(buf2) + 1);
+}
+
+TEST(MemorySanitizer, opendir) {
+  DIR *dir = opendir(".");
+  closedir(dir);
+
+  char name[10] = ".";
+  __msan_poison(name, sizeof(name));
+  EXPECT_UMR(dir = opendir(name));
+  closedir(dir);
 }
 
 TEST(MemorySanitizer, readdir) {
