@@ -9,6 +9,7 @@ append_list_if(COMPILER_RT_HAS_FPIE_FLAG -fPIE TSAN_CFLAGS)
 append_no_rtti_flag(TSAN_CFLAGS)
 
 set(TSAN_RTL_CFLAGS ${TSAN_CFLAGS})
+append_list_if(COMPILER_RT_HAS_MSSE3_FLAG -msse3 TSAN_RTL_CFLAGS)
 append_list_if(SANITIZER_LIMIT_FRAME_SIZE -Wframe-larger-than=512
                TSAN_RTL_CFLAGS)
 append_list_if(COMPILER_RT_HAS_WGLOBAL_CONSTRUCTORS_FLAG -Wglobal-constructors
@@ -98,6 +99,15 @@ if(CAN_TARGET_x86_64 AND UNIX AND NOT APPLE)
 endif()
 
 add_dependencies(compiler-rt tsan)
+
+# Sanity check for Go runtime.
+add_custom_target(GotsanRuntimeCheck
+  COMMAND CC=${CMAKE_C_COMPILER} IN_TMPDIR=1 SILENT=1
+          ${CMAKE_CURRENT_SOURCE_DIR}/go/buildgo.sh
+  DEPENDS clang_rt.tsan-${arch}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/go
+  COMMENT "Checking TSan Go runtime..."
+  VERBATIM)
 
 # Build libcxx instrumented with TSan.
 if(TSAN_SUPPORTED_ARCH AND
