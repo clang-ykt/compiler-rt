@@ -58,8 +58,10 @@ real_pthread_attr_getstack(void *attr, void **addr, size_t *size);
 }  // extern "C"
 
 static int my_pthread_attr_getstack(void *attr, void **addr, size_t *size) {
+#if !SANITIZER_GO
   if (real_pthread_attr_getstack)
     return real_pthread_attr_getstack((pthread_attr_t *)attr, addr, size);
+#endif
   return pthread_attr_getstack((pthread_attr_t *)attr, addr, size);
 }
 
@@ -67,8 +69,10 @@ SANITIZER_WEAK_ATTRIBUTE int
 real_sigaction(int signum, const void *act, void *oldact);
 
 int internal_sigaction(int signum, const void *act, void *oldact) {
+#if !SANITIZER_GO
   if (real_sigaction)
     return real_sigaction(signum, act, oldact);
+#endif
   return sigaction(signum, (const struct sigaction *)act,
                    (struct sigaction *)oldact);
 }
@@ -120,6 +124,7 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
   *stack_bottom = (uptr)stackaddr;
 }
 
+#if !SANITIZER_GO
 bool SetEnv(const char *name, const char *value) {
   void *f = dlsym(RTLD_NEXT, "setenv");
   if (f == 0)
@@ -130,6 +135,7 @@ bool SetEnv(const char *name, const char *value) {
   internal_memcpy(&setenv_f, &f, sizeof(f));
   return setenv_f(name, value, 1) == 0;
 }
+#endif
 
 bool SanitizerSetThreadName(const char *name) {
 #ifdef PR_SET_NAME
@@ -163,7 +169,7 @@ static uptr g_tls_size;
 #endif
 
 void InitTlsSize() {
-#if !SANITIZER_FREEBSD && !SANITIZER_ANDROID
+#if !SANITIZER_FREEBSD && !SANITIZER_ANDROID && !SANITIZER_GO
   typedef void (*get_tls_func)(size_t*, size_t*) DL_INTERNAL_FUNCTION;
   get_tls_func get_tls;
   void *get_tls_static_info_ptr = dlsym(RTLD_NEXT, "_dl_get_tls_static_info");
@@ -261,6 +267,7 @@ uptr ThreadSelf() {
 }
 #endif  // SANITIZER_FREEBSD
 
+#if !SANITIZER_GO
 static void GetTls(uptr *addr, uptr *size) {
 #if SANITIZER_LINUX
 # if defined(__x86_64__) || defined(__i386__)
@@ -289,6 +296,7 @@ static void GetTls(uptr *addr, uptr *size) {
 # error "Unknown OS"
 #endif
 }
+#endif
 
 uptr GetTlsSize() {
 #if SANITIZER_FREEBSD
@@ -302,6 +310,10 @@ uptr GetTlsSize() {
 
 void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
                           uptr *tls_addr, uptr *tls_size) {
+#if SANITIZER_GO
+  // Stub implementation for Go.
+  *stk_addr = *stk_size = *tls_addr = *tls_size = 0;
+#else
   GetTls(tls_addr, tls_size);
 
   uptr stack_top, stack_bottom;
@@ -318,6 +330,7 @@ void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
       *tls_addr = *stk_addr + *stk_size;
     }
   }
+#endif
 }
 
 void AdjustStackSize(void *attr_) {

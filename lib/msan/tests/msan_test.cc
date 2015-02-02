@@ -21,6 +21,19 @@
 #include "sanitizer/allocator_interface.h"
 #include "sanitizer/msan_interface.h"
 
+#if defined(__FreeBSD__)
+# define _KERNEL  // To declare 'shminfo' structure.
+# include <sys/shm.h>
+# undef _KERNEL
+extern "C" {
+// <sys/shm.h> doesn't declare these functions in _KERNEL mode.
+void *shmat(int, const void *, int);
+int shmget(key_t, size_t, int);
+int shmctl(int, int, struct shmid_ds *);
+int shmdt(const void *);
+}
+#endif
+
 #include <inttypes.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -1149,12 +1162,15 @@ TEST(MemorySanitizer, getcwd_gnu) {
   free(res);
 }
 
+// There's no get_current_dir_name() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, get_current_dir_name) {
   char* res = get_current_dir_name();
   ASSERT_TRUE(res != NULL);
   EXPECT_NOT_POISONED(res[0]);
   free(res);
 }
+#endif
 
 TEST(MemorySanitizer, shmctl) {
   int id = shmget(IPC_PRIVATE, 4096, 0644 | IPC_CREAT);
@@ -1165,6 +1181,8 @@ TEST(MemorySanitizer, shmctl) {
   ASSERT_GT(res, -1);
   EXPECT_NOT_POISONED(ds);
 
+  // FreeBSD does not support shmctl(IPC_INFO) and shmctl(SHM_INFO).
+#if !defined(__FreeBSD__)
   struct shminfo si;
   res = shmctl(id, IPC_INFO, (struct shmid_ds *)&si);
   ASSERT_GT(res, -1);
@@ -1174,6 +1192,7 @@ TEST(MemorySanitizer, shmctl) {
   res = shmctl(id, SHM_INFO, (struct shmid_ds *)&s_i);
   ASSERT_GT(res, -1);
   EXPECT_NOT_POISONED(s_i);
+#endif
 
   res = shmctl(id, IPC_RMID, 0);
   ASSERT_GT(res, -1);
@@ -1207,6 +1226,8 @@ TEST(MemorySanitizer, shmat) {
   ASSERT_GT(res, -1);
 }
 
+// There's no random_r() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, random_r) {
   int32_t x;
   char z[64];
@@ -1222,6 +1243,7 @@ TEST(MemorySanitizer, random_r) {
   ASSERT_EQ(0, res);
   EXPECT_NOT_POISONED(x);
 }
+#endif
 
 TEST(MemorySanitizer, confstr) {
   char buf[3];
@@ -1285,6 +1307,8 @@ TEST(MemorySanitizer, realpath_null) {
   free(res);
 }
 
+// There's no canonicalize_file_name() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, canonicalize_file_name) {
   const char* relpath = ".";
   char* res = canonicalize_file_name(relpath);
@@ -1292,6 +1316,7 @@ TEST(MemorySanitizer, canonicalize_file_name) {
   EXPECT_NOT_POISONED(res[0]);
   free(res);
 }
+#endif
 
 extern char **environ;
 
@@ -1689,26 +1714,35 @@ TEST(MemorySanitizer, modfl) {
   EXPECT_NOT_POISONED(y);
 }
 
+// There's no sincos() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, sincos) {
   double s, c;
   sincos(0.2, &s, &c);
   EXPECT_NOT_POISONED(s);
   EXPECT_NOT_POISONED(c);
 }
+#endif
 
+// There's no sincosf() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, sincosf) {
   float s, c;
   sincosf(0.2, &s, &c);
   EXPECT_NOT_POISONED(s);
   EXPECT_NOT_POISONED(c);
 }
+#endif
 
+// There's no sincosl() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, sincosl) {
   long double s, c;
   sincosl(0.2, &s, &c);
   EXPECT_NOT_POISONED(s);
   EXPECT_NOT_POISONED(c);
 }
+#endif
 
 TEST(MemorySanitizer, remquo) {
   int quo;
@@ -1763,13 +1797,18 @@ TEST(MemorySanitizer, lgammaf_r) {
   EXPECT_NOT_POISONED(sgn);
 }
 
+// There's no lgammal_r() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, lgammal_r) {
   int sgn;
   long double res = lgammal_r(1.1, &sgn);
   ASSERT_NE(0.0, res);
   EXPECT_NOT_POISONED(sgn);
 }
+#endif
 
+// There's no drand48_r() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, drand48_r) {
   struct drand48_data buf;
   srand48_r(0, &buf);
@@ -1777,7 +1816,10 @@ TEST(MemorySanitizer, drand48_r) {
   drand48_r(&buf, &d);
   EXPECT_NOT_POISONED(d);
 }
+#endif
 
+// There's no lrand48_r() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, lrand48_r) {
   struct drand48_data buf;
   srand48_r(0, &buf);
@@ -1785,6 +1827,7 @@ TEST(MemorySanitizer, lrand48_r) {
   lrand48_r(&buf, &d);
   EXPECT_NOT_POISONED(d);
 }
+#endif
 
 TEST(MemorySanitizer, sprintf) {  // NOLINT
   char buff[10];
@@ -2049,6 +2092,8 @@ TEST(MemorySanitizer, localtime_r) {
   EXPECT_NE(0U, strlen(time.tm_zone));
 }
 
+// There's no getmntent() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, getmntent) {
   FILE *fp = setmntent("/etc/fstab", "r");
   struct mntent *mnt = getmntent(fp);
@@ -2061,7 +2106,10 @@ TEST(MemorySanitizer, getmntent) {
   EXPECT_NOT_POISONED(mnt->mnt_passno);
   fclose(fp);
 }
+#endif
 
+// There's no getmntent_r() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, getmntent_r) {
   FILE *fp = setmntent("/etc/fstab", "r");
   struct mntent mntbuf;
@@ -2076,6 +2124,7 @@ TEST(MemorySanitizer, getmntent_r) {
   EXPECT_NOT_POISONED(mnt->mnt_passno);
   fclose(fp);
 }
+#endif
 
 TEST(MemorySanitizer, ether) {
   const char *asc = "11:22:33:44:55:66";
@@ -2847,12 +2896,15 @@ TEST(MemorySanitizer, dlopenFailed) {
 
 #endif // MSAN_TEST_DISABLE_DLOPEN
 
+// There's no sched_getaffinity() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, sched_getaffinity) {
   cpu_set_t mask;
   int res = sched_getaffinity(getpid(), sizeof(mask), &mask);
   ASSERT_EQ(0, res);
   EXPECT_NOT_POISONED(mask);
 }
+#endif
 
 TEST(MemorySanitizer, scanf) {
   const char *input = "42 hello";
@@ -3082,11 +3134,14 @@ TEST(MemorySanitizer, posix_memalign) {
   free(p);
 }
 
+// There's no memalign() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, memalign) {
   void *p = memalign(4096, 13);
   EXPECT_EQ(0U, (uintptr_t)p % kPageSize);
   free(p);
 }
+#endif
 
 TEST(MemorySanitizer, valloc) {
   void *a = valloc(100);
@@ -3094,6 +3149,8 @@ TEST(MemorySanitizer, valloc) {
   free(a);
 }
 
+// There's no pvalloc() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, pvalloc) {
   void *p = pvalloc(kPageSize + 100);
   EXPECT_EQ(0U, (uintptr_t)p % kPageSize);
@@ -3105,6 +3162,7 @@ TEST(MemorySanitizer, pvalloc) {
   EXPECT_EQ(kPageSize, __sanitizer_get_allocated_size(p));
   free(p);
 }
+#endif
 
 TEST(MemorySanitizer, inet_pton) {
   const char *s = "1:0:0:0:0:0:0:8";
@@ -3148,12 +3206,15 @@ TEST(MemorySanitizer, gethostname) {
   EXPECT_NOT_POISONED(strlen(buf));
 }
 
+// There's no sysinfo() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, sysinfo) {
   struct sysinfo info;
   int res = sysinfo(&info);
   ASSERT_EQ(0, res);
   EXPECT_NOT_POISONED(info);
 }
+#endif
 
 TEST(MemorySanitizer, getpwuid) {
   struct passwd *p = getpwuid(0); // root
@@ -3241,6 +3302,8 @@ TEST(MemorySanitizer, getpwent_r) {
   EXPECT_NOT_POISONED(pwdres);
 }
 
+// There's no fgetpwent() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, fgetpwent) {
   FILE *fp = fopen("/etc/passwd", "r");
   struct passwd *p = fgetpwent(fp);
@@ -3251,6 +3314,7 @@ TEST(MemorySanitizer, fgetpwent) {
   EXPECT_NOT_POISONED(p->pw_uid);
   fclose(fp);
 }
+#endif
 
 TEST(MemorySanitizer, getgrent) {
   setgrent();
@@ -3262,6 +3326,8 @@ TEST(MemorySanitizer, getgrent) {
   EXPECT_NOT_POISONED(p->gr_gid);
 }
 
+// There's no fgetgrent() on FreeBSD.
+#if !defined(__FreeBSD__)
 TEST(MemorySanitizer, fgetgrent) {
   FILE *fp = fopen("/etc/group", "r");
   struct group *grp = fgetgrent(fp);
@@ -3276,6 +3342,7 @@ TEST(MemorySanitizer, fgetgrent) {
   }
   fclose(fp);
 }
+#endif
 
 TEST(MemorySanitizer, getgrent_r) {
   struct group grp;

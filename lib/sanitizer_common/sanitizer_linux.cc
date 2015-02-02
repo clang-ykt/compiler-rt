@@ -449,32 +449,18 @@ void ReExec() {
   Die();
 }
 
-// Stub implementation of GetThreadStackAndTls for Go.
-#if SANITIZER_GO
-void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
-                          uptr *tls_addr, uptr *tls_size) {
-  *stk_addr = 0;
-  *stk_size = 0;
-  *tls_addr = 0;
-  *tls_size = 0;
-}
-#endif  // SANITIZER_GO
-
 enum MutexState {
   MtxUnlocked = 0,
   MtxLocked = 1,
   MtxSleeping = 2
 };
 
-BlockingMutex::BlockingMutex(LinkerInitialized) {
-  CHECK_EQ(owner_, 0);
-}
-
 BlockingMutex::BlockingMutex() {
   internal_memset(this, 0, sizeof(*this));
 }
 
 void BlockingMutex::Lock() {
+  CHECK_EQ(owner_, 0);
   atomic_uint32_t *m = reinterpret_cast<atomic_uint32_t *>(&opaque_storage_);
   if (atomic_exchange(m, MtxLocked, memory_order_acquire) == MtxUnlocked)
     return;
@@ -774,6 +760,7 @@ bool LibraryNameIs(const char *full_name, const char *base_name) {
 #if !SANITIZER_ANDROID
 // Call cb for each region mapped by map.
 void ForEachMappedRegion(link_map *map, void (*cb)(const void *, uptr)) {
+  CHECK_NE(map, nullptr);
 #if !SANITIZER_FREEBSD
   typedef ElfW(Phdr) Elf_Phdr;
   typedef ElfW(Ehdr) Elf_Ehdr;
