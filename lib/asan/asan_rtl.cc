@@ -100,6 +100,8 @@ void ReserveShadowMemoryRange(uptr beg, uptr end) {
   }
   if (common_flags()->no_huge_pages_for_shadow)
     NoHugePagesInRegion(beg, size);
+  if (common_flags()->use_madv_dontdump)
+    DontDumpShadowMemory(beg, size);
 }
 
 // --------------- LowLevelAllocateCallbac ---------- {{{1
@@ -312,7 +314,7 @@ static void AsanInitInternal() {
 
   // Initialize flags. This must be done early, because most of the
   // initialization steps look at flags().
-  InitializeFlags(flags());
+  InitializeFlags();
 
   SetCanPoisonMemory(flags()->poison_heap);
   SetMallocContextSize(common_flags()->malloc_context_size);

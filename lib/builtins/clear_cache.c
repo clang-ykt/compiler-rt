@@ -22,10 +22,10 @@
   #include <machine/sysarch.h>
 #endif
 
-#if defined(__ANDROID__) && defined(__mips__)
+#if defined(__mips__)
   #include <sys/cachectl.h>
   #include <sys/syscall.h>
-  #ifdef __LP64__
+  #if defined(__ANDROID__) && defined(__LP64__)
     /*
      * clear_mips_cache - Invalidates instruction cache for Mips.
      */
@@ -97,7 +97,7 @@ void __clear_cache(void *start, void *end) {
 
         sysarch(ARM_SYNC_ICACHE, &arg);
     #elif defined(__ANDROID__)
-         const register int start_reg __asm("r0") = (int) (intptr_t) start;
+         register int start_reg __asm("r0") = (int) (intptr_t) start;
          const register int end_reg __asm("r1") = (int) (intptr_t) end;
          const register int flags __asm("r2") = 0;
          const register int syscall_nr __asm("r7") = __ARM_NR_cacheflush;
@@ -109,10 +109,10 @@ void __clear_cache(void *start, void *end) {
     #else
         compilerrt_abort();
     #endif
-#elif defined(__ANDROID__) && defined(__mips__)
+#elif defined(__mips__)
   const uintptr_t start_int = (uintptr_t) start;
   const uintptr_t end_int = (uintptr_t) end;
-    #ifdef __LP64__
+    #if defined(__ANDROID__) && defined(__LP64__)
         // Call synci implementation for short address range.
         const uintptr_t address_range_limit = 256;
         if ((end_int - start_int) <= address_range_limit) {
