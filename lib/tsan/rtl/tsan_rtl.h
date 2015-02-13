@@ -351,7 +351,9 @@ struct ThreadState {
   Vector<JmpBuf> jmp_bufs;
   int ignore_interceptors;
 #endif
+#ifdef TSAN_COLLECT_STATS
   u64 stat[StatCnt];
+#endif
   const int tid;
   const int unique_id;
   bool in_symbolizer;
@@ -365,7 +367,9 @@ struct ThreadState {
   const uptr tls_size;
   ThreadContext *tctx;
 
+#if SANITIZER_DEBUG && !SANITIZER_GO
   InternalDeadlockDetector internal_deadlock_detector;
+#endif
   DDPhysicalThread *dd_pt;
   DDLogicalThread *dd_lt;
 
@@ -539,15 +543,20 @@ void ObtainCurrentStack(ThreadState *thr, uptr toppc, StackTraceTy *stack) {
 }
 
 
+#ifdef TSAN_COLLECT_STATS
 void StatAggregate(u64 *dst, u64 *src);
 void StatOutput(u64 *stat);
+#endif
+
 void ALWAYS_INLINE StatInc(ThreadState *thr, StatType typ, u64 n = 1) {
-  if (kCollectStats)
-    thr->stat[typ] += n;
+#ifdef TSAN_COLLECT_STATS
+  thr->stat[typ] += n;
+#endif
 }
 void ALWAYS_INLINE StatSet(ThreadState *thr, StatType typ, u64 n) {
-  if (kCollectStats)
-    thr->stat[typ] = n;
+#ifdef TSAN_COLLECT_STATS
+  thr->stat[typ] = n;
+#endif
 }
 
 void MapShadow(uptr addr, uptr size);
