@@ -22,6 +22,7 @@
 //   COMMON_INTERCEPTOR_FD_RELEASE
 //   COMMON_INTERCEPTOR_FD_ACCESS
 //   COMMON_INTERCEPTOR_SET_THREAD_NAME
+//   COMMON_INTERCEPTOR_ON_DLOPEN
 //   COMMON_INTERCEPTOR_ON_EXIT
 //   COMMON_INTERCEPTOR_MUTEX_LOCK
 //   COMMON_INTERCEPTOR_MUTEX_UNLOCK
@@ -99,6 +100,10 @@
 
 #ifndef COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED
 #define COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED (0)
+#endif
+
+#ifndef COMMON_INTERCEPTOR_ON_DLOPEN
+#define COMMON_INTERCEPTOR_ON_DLOPEN(filename, flag) {}
 #endif
 
 struct FileMetadata {
@@ -1029,6 +1034,12 @@ FORMAT_INTERCEPTOR_IMPL(__isoc99_snprintf, __isoc99_vsnprintf, str, size,
 #if SANITIZER_INTERCEPT_IOCTL
 #include "sanitizer_common_interceptors_ioctl.inc"
 INTERCEPTOR(int, ioctl, int d, unsigned long request, ...) {
+  // We need a frame pointer, because we call into ioctl_common_[pre|post] which
+  // can trigger a report and we need to be able to unwind through this
+  // function.  On Mac in debug mode we might not have a frame pointer, because
+  // ioctl_common_[pre|post] doesn't get inlined here.
+  ENABLE_FRAME_POINTER;
+
   void *ctx;
   va_list ap;
   va_start(ap, request);
@@ -4688,6 +4699,7 @@ INTERCEPTOR(int, fclose, __sanitizer_FILE *fp) {
 INTERCEPTOR(void*, dlopen, const char *filename, int flag) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER_NOIGNORE(ctx, dlopen, filename, flag);
+  COMMON_INTERCEPTOR_ON_DLOPEN(filename, flag);
   void *res = REAL(dlopen)(filename, flag);
   COMMON_INTERCEPTOR_LIBRARY_LOADED(filename, res);
   return res;

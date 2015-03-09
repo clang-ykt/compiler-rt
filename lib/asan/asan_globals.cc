@@ -18,6 +18,7 @@
 #include "asan_report.h"
 #include "asan_stack.h"
 #include "asan_stats.h"
+#include "asan_suppressions.h"
 #include "asan_thread.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_mutex.h"
@@ -158,7 +159,8 @@ static void RegisterGlobal(const Global *g) {
       // the entire redzone of the second global may be within the first global.
       for (ListOfGlobals *l = list_of_all_globals; l; l = l->next) {
         if (g->beg == l->g->beg &&
-            (flags()->detect_odr_violation >= 2 || g->size != l->g->size))
+            (flags()->detect_odr_violation >= 2 || g->size != l->g->size) &&
+            !IsODRViolationSuppressed(g->name))
           ReportODRViolation(g, FindRegistrationSite(g),
                              l->g, FindRegistrationSite(l->g));
       }
@@ -218,7 +220,7 @@ using namespace __asan;  // NOLINT
 // Register an array of globals.
 void __asan_register_globals(__asan_global *globals, uptr n) {
   if (!flags()->report_globals) return;
-  GET_STACK_TRACE_FATAL_HERE;
+  GET_STACK_TRACE_MALLOC;
   u32 stack_id = StackDepotPut(stack);
   BlockingMutexLock lock(&mu_for_globals);
   if (!global_registration_site_vector)

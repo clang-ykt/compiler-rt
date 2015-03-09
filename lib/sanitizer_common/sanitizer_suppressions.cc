@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Suppression parsing/matching code shared between TSan and LSan.
+// Suppression parsing/matching code.
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,55 +21,75 @@
 
 namespace __sanitizer {
 
-static const char *const kTypeStrings[SuppressionTypeCount] = {
-    "none", "race", "mutex", "thread", "signal", "leak", "called_from_lib",
-    "deadlock", "vptr_check", "interceptor_name", "interceptor_via_fun",
-    "interceptor_via_lib"};
-
-ALIGNED(64) static char placeholder[sizeof(SuppressionContext)];
-static SuppressionContext *suppression_ctx = 0;
-
-SuppressionContext::SuppressionContext() : suppressions_(1), can_parse_(true) {
-  internal_memset(has_suppresson_type_, 0, sizeof(has_suppresson_type_));
+SuppressionContext::SuppressionContext(const char *suppression_types[],
+                                       int suppression_types_num)
+    : suppression_types_(suppression_types),
+      suppression_types_num_(suppression_types_num), suppressions_(1),
+      can_parse_(true) {
+  CHECK_LE(suppression_types_num_, kMaxSuppressionTypes);
+  internal_memset(has_suppression_type_, 0, suppression_types_num_);
 }
 
-SuppressionContext *SuppressionContext::Get() {
-  CHECK(suppression_ctx);
-  return suppression_ctx;
+static bool GetPathAssumingFileIsRelativeToExec(const char *file_path,
+                                                /*out*/char *new_file_path,
+                                                uptr new_file_path_size) {
+  InternalScopedString exec(kMaxPathLength);
+  if (ReadBinaryName(exec.data(), exec.size())) {
+    const char *file_name_pos = StripModuleName(exec.data());
+    uptr path_to_exec_len = file_name_pos - exec.data();
+    internal_strncat(new_file_path, exec.data(),
+                     Min(path_to_exec_len, new_file_path_size - 1));
+    internal_strncat(new_file_path, file_path,
+                     new_file_path_size - internal_strlen(new_file_path) - 1);
+    return true;
+  }
+  return false;
 }
 
-void SuppressionContext::InitIfNecessary() {
-  if (suppression_ctx)
+void SuppressionContext::ParseFromFile(const char *filename) {
+  if (filename[0] == '\0')
     return;
-  suppression_ctx = new(placeholder) SuppressionContext;
-  if (common_flags()->suppressions[0] == '\0')
-    return;
-  char *suppressions_from_file;
+
+  // If we cannot find the file, check if its location is relative to
+  // the location of the executable.
+  InternalScopedString new_file_path(kMaxPathLength);
+  if (!FileExists(filename) && !IsAbsolutePath(filename) &&
+      GetPathAssumingFileIsRelativeToExec(filename, new_file_path.data(),
+                                          new_file_path.size())) {
+    filename = new_file_path.data();
+  }
+
+  // Read the file.
+  char *file_contents;
   uptr buffer_size;
+  const uptr max_len = 1 << 26;
   uptr contents_size =
-      ReadFileToBuffer(common_flags()->suppressions, &suppressions_from_file,
-                       &buffer_size, 1 << 26 /* max_len */);
+    ReadFileToBuffer(filename, &file_contents, &buffer_size, max_len);
+  VPrintf(1, "%s: reading suppressions file at %s\n",
+          SanitizerToolName, filename);
+
   if (contents_size == 0) {
     Printf("%s: failed to read suppressions file '%s'\n", SanitizerToolName,
-           common_flags()->suppressions);
+           filename);
     Die();
   }
-  suppression_ctx->Parse(suppressions_from_file);
+
+  Parse(file_contents);
 }
 
-bool SuppressionContext::Match(const char *str, SuppressionType type,
+bool SuppressionContext::Match(const char *str, const char *type,
                                Suppression **s) {
-  if (!has_suppresson_type_[type])
-    return false;
   can_parse_ = false;
-  uptr i;
-  for (i = 0; i < suppressions_.size(); i++)
-    if (type == suppressions_[i].type &&
-        TemplateMatch(suppressions_[i].templ, str))
-      break;
-  if (i == suppressions_.size()) return false;
-  *s = &suppressions_[i];
-  return true;
+  if (!HasSuppressionType(type))
+    return false;
+  for (uptr i = 0; i < suppressions_.size(); i++) {
+    Suppression &cur = suppressions_[i];
+    if (0 == internal_strcmp(cur.type, type) && TemplateMatch(cur.templ, str)) {
+      *s = &cur;
+      return true;
+    }
+  }
+  return false;
 }
 
 static const char *StripPrefix(const char *str, const char *prefix) {
@@ -97,26 +117,26 @@ void SuppressionContext::Parse(const char *str) {
       while (line != end2 && (end2[-1] == ' ' || end2[-1] == '\t'))
         end2--;
       int type;
-      for (type = 0; type < SuppressionTypeCount; type++) {
-        const char *next_char = StripPrefix(line, kTypeStrings[type]);
+      for (type = 0; type < suppression_types_num_; type++) {
+        const char *next_char = StripPrefix(line, suppression_types_[type]);
         if (next_char && *next_char == ':') {
           line = ++next_char;
           break;
         }
       }
-      if (type == SuppressionTypeCount) {
+      if (type == suppression_types_num_) {
         Printf("%s: failed to parse suppressions\n", SanitizerToolName);
         Die();
       }
       Suppression s;
-      s.type = static_cast<SuppressionType>(type);
+      s.type = suppression_types_[type];
       s.templ = (char*)InternalAlloc(end2 - line + 1);
       internal_memcpy(s.templ, line, end2 - line);
       s.templ[end2 - line] = 0;
       s.hit_count = 0;
       s.weight = 0;
       suppressions_.push_back(s);
-      has_suppresson_type_[s.type] = true;
+      has_suppression_type_[type] = true;
     }
     if (end[0] == 0)
       break;
@@ -128,8 +148,12 @@ uptr SuppressionContext::SuppressionCount() const {
   return suppressions_.size();
 }
 
-bool SuppressionContext::HasSuppressionType(SuppressionType type) const {
-  return has_suppresson_type_[type];
+bool SuppressionContext::HasSuppressionType(const char *type) const {
+  for (int i = 0; i < suppression_types_num_; i++) {
+    if (0 == internal_strcmp(type, suppression_types_[i]))
+      return has_suppression_type_[i];
+  }
+  return false;
 }
 
 const Suppression *SuppressionContext::SuppressionAt(uptr i) const {
@@ -142,11 +166,6 @@ void SuppressionContext::GetMatched(
   for (uptr i = 0; i < suppressions_.size(); i++)
     if (suppressions_[i].hit_count)
       matched->push_back(&suppressions_[i]);
-}
-
-const char *SuppressionTypeString(SuppressionType t) {
-  CHECK(t < SuppressionTypeCount);
-  return kTypeStrings[t];
 }
 
 }  // namespace __sanitizer

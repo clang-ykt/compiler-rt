@@ -77,13 +77,22 @@ class CoverageData {
                  uptr cache_size);
   void DumpCallerCalleePairs();
   void DumpTrace();
+  void DumpAsBitSet();
+  void DumpCounters();
+  void DumpOffsets();
+  void DumpAll();
 
   ALWAYS_INLINE
   void TraceBasicBlock(s32 *id);
 
   void InitializeGuardArray(s32 *guards);
-  void InitializeGuards(s32 *guards, uptr n);
+  void InitializeGuards(s32 *guards, uptr n, const char *module_name,
+                        uptr caller_pc);
+  void UpdateModuleNameVec(uptr caller_pc, uptr range_beg, uptr range_end);
+  void InitializeCounters(u8 *counters, uptr n);
   void ReinitializeGuards();
+  uptr GetNumberOf8bitCounters();
+  uptr Update8bitCounterBitsetAndClearCounters(u8 *bitset);
 
   uptr *data();
   uptr size();
@@ -91,7 +100,7 @@ class CoverageData {
  private:
   // Maximal size pc array may ever grow.
   // We MmapNoReserve this space to ensure that the array is contiguous.
-  static const uptr kPcArrayMaxSize = FIRST_32_SECOND_64(1 << 24, 1 << 27);
+  static const uptr kPcArrayMaxSize = FIRST_32_SECOND_64(1 << 26, 1 << 27);
   // The amount file mapping for the pc array is grown by.
   static const uptr kPcArrayMmapSize = 64 * 1024;
 
@@ -109,6 +118,23 @@ class CoverageData {
 
   // Vector of coverage guard arrays, protected by mu.
   InternalMmapVectorNoCtor<s32*> guard_array_vec;
+
+  struct NamedPcRange {
+    const char *name;
+    uptr beg, end; // elements [beg,end) in pc_array.
+  };
+
+  // Vector of module and compilation unit pc ranges.
+  InternalMmapVectorNoCtor<NamedPcRange> comp_unit_name_vec;
+  InternalMmapVectorNoCtor<NamedPcRange> module_name_vec;
+
+  struct CounterAndSize {
+    u8 *counters;
+    uptr n;
+  };
+
+  InternalMmapVectorNoCtor<CounterAndSize> counters_vec;
+  uptr num_8bit_counters;
 
   // Caller-Callee (cc) array, size and current index.
   static const uptr kCcArrayMaxSize = FIRST_32_SECOND_64(1 << 18, 1 << 24);
@@ -181,6 +207,8 @@ void CoverageData::Enable() {
            GetMmapGranularity());
   tr_event_array_size = kTrEventArrayMaxSize;
   tr_event_pointer = tr_event_array;
+
+  num_8bit_counters = 0;
 }
 
 void CoverageData::InitializeGuardArray(s32 *guards) {
@@ -286,14 +314,42 @@ void CoverageData::Extend(uptr npcs) {
   atomic_store(&pc_array_size, size, memory_order_release);
 }
 
-void CoverageData::InitializeGuards(s32 *guards, uptr n) {
+void CoverageData::InitializeCounters(u8 *counters, uptr n) {
+  if (!counters) return;
+  CHECK_EQ(reinterpret_cast<uptr>(counters) % 16, 0);
+  n = RoundUpTo(n, 16); // The compiler must ensure that counters is 16-aligned.
+  SpinMutexLock l(&mu);
+  counters_vec.push_back({counters, n});
+  num_8bit_counters += n;
+}
+
+void CoverageData::UpdateModuleNameVec(uptr caller_pc, uptr range_beg,
+                                       uptr range_end) {
+  auto sym = Symbolizer::GetOrInit();
+  if (!sym)
+    return;
+  const char *module_name = sym->GetModuleNameForPc(caller_pc);
+  if (!module_name) return;
+  if (module_name_vec.empty() || module_name_vec.back().name != module_name)
+    module_name_vec.push_back({module_name, range_beg, range_end});
+  else
+    module_name_vec.back().end = range_end;
+}
+
+void CoverageData::InitializeGuards(s32 *guards, uptr n,
+                                    const char *comp_unit_name,
+                                    uptr caller_pc) {
   // The array 'guards' has n+1 elements, we use the element zero
   // to store 'n'.
   CHECK_LT(n, 1 << 30);
   guards[0] = static_cast<s32>(n);
   InitializeGuardArray(guards);
   SpinMutexLock l(&mu);
+  uptr range_end = atomic_load(&pc_array_index, memory_order_relaxed);
+  uptr range_beg = range_end - n;
+  comp_unit_name_vec.push_back({comp_unit_name, range_beg, range_end});
   guard_array_vec.push_back(guards);
+  UpdateModuleNameVec(caller_pc, range_beg, range_end);
 }
 
 // If guard is negative, atomically set it to -guard and store the PC in
@@ -347,6 +403,64 @@ void CoverageData::IndirCall(uptr caller, uptr callee, uptr callee_cache[],
     if (was == callee)  // Already have this callee.
       return;
   }
+}
+
+uptr CoverageData::GetNumberOf8bitCounters() {
+  return num_8bit_counters;
+}
+
+// Map every 8bit counter to a 8-bit bitset and clear the counter.
+uptr CoverageData::Update8bitCounterBitsetAndClearCounters(u8 *bitset) {
+  uptr num_new_bits = 0;
+  uptr cur = 0;
+  // For better speed we map 8 counters to 8 bytes of bitset at once.
+  static const uptr kBatchSize = 8;
+  CHECK_EQ(reinterpret_cast<uptr>(bitset) % kBatchSize, 0);
+  for (uptr i = 0, len = counters_vec.size(); i < len; i++) {
+    u8 *c = counters_vec[i].counters;
+    uptr n = counters_vec[i].n;
+    CHECK_EQ(n % 16, 0);
+    CHECK_EQ(cur % kBatchSize, 0);
+    CHECK_EQ(reinterpret_cast<uptr>(c) % kBatchSize, 0);
+    if (!bitset) {
+      internal_bzero_aligned16(c, n);
+      cur += n;
+      continue;
+    }
+    for (uptr j = 0; j < n; j += kBatchSize, cur += kBatchSize) {
+      CHECK_LT(cur, num_8bit_counters);
+      u64 *pc64 = reinterpret_cast<u64*>(c + j);
+      u64 *pb64 = reinterpret_cast<u64*>(bitset + cur);
+      u64 c64 = *pc64;
+      u64 old_bits_64 = *pb64;
+      u64 new_bits_64 = old_bits_64;
+      if (c64) {
+        *pc64 = 0;
+        for (uptr k = 0; k < kBatchSize; k++) {
+          u64 x = (c64 >> (8 * k)) & 0xff;
+          if (x) {
+            u64 bit = 0;
+            /**/ if (x >= 128) bit = 128;
+            else if (x >= 32) bit = 64;
+            else if (x >= 16) bit = 32;
+            else if (x >= 8) bit = 16;
+            else if (x >= 4) bit = 8;
+            else if (x >= 3) bit = 4;
+            else if (x >= 2) bit = 2;
+            else if (x >= 1) bit = 1;
+            u64 mask = bit << (8 * k);
+            if (!(new_bits_64 & mask)) {
+              num_new_bits++;
+              new_bits_64 |= mask;
+            }
+          }
+        }
+        *pb64 = new_bits_64;
+      }
+    }
+  }
+  CHECK_EQ(cur, num_8bit_counters);
+  return num_new_bits;
 }
 
 uptr *CoverageData::data() {
@@ -408,23 +522,23 @@ static void CovWritePacked(int pid, const char *module, const void *blob,
 // If packed = true and name == 0: <pid>.<sancov>.<packed>.
 // If packed = true and name != 0: <name>.<sancov>.<packed> (name is
 // user-supplied).
-static int CovOpenFile(bool packed, const char *name,
-                       const char *extension = "sancov") {
-  InternalScopedString path(kMaxPathLength);
+static int CovOpenFile(InternalScopedString *path, bool packed,
+                       const char *name, const char *extension = "sancov") {
+  path->clear();
   if (!packed) {
     CHECK(name);
-    path.append("%s/%s.%zd.%s", coverage_dir, name, internal_getpid(),
+    path->append("%s/%s.%zd.%s", coverage_dir, name, internal_getpid(),
                 extension);
   } else {
     if (!name)
-      path.append("%s/%zd.%s.packed", coverage_dir, internal_getpid(),
+      path->append("%s/%zd.%s.packed", coverage_dir, internal_getpid(),
                   extension);
     else
-      path.append("%s/%s.%s.packed", coverage_dir, name, extension);
+      path->append("%s/%s.%s.packed", coverage_dir, name, extension);
   }
-  uptr fd = OpenFile(path.data(), true);
+  uptr fd = OpenFile(path->data(), true);
   if (internal_iserror(fd)) {
-    Report(" SanitizerCoverage: failed to open %s for writing\n", path.data());
+    Report(" SanitizerCoverage: failed to open %s for writing\n", path->data());
     return -1;
   }
   return fd;
@@ -445,12 +559,21 @@ void CoverageData::DumpTrace() {
                                      &module_address);
     out.append("%s 0x%zx\n", module_name, module_address);
   }
-  int fd = CovOpenFile(false, "trace-points");
+  InternalScopedString path(kMaxPathLength);
+  int fd = CovOpenFile(&path, false, "trace-points");
   if (fd < 0) return;
   internal_write(fd, out.data(), out.length());
   internal_close(fd);
 
-  fd = CovOpenFile(false, "trace-events");
+  fd = CovOpenFile(&path, false, "trace-compunits");
+  if (fd < 0) return;
+  out.clear();
+  for (uptr i = 0; i < comp_unit_name_vec.size(); i++)
+    out.append("%s\n", comp_unit_name_vec[i].name);
+  internal_write(fd, out.data(), out.length());
+  internal_close(fd);
+
+  fd = CovOpenFile(&path, false, "trace-events");
   if (fd < 0) return;
   uptr bytes_to_write = max_idx * sizeof(tr_event_array[0]);
   u8 *event_bytes = reinterpret_cast<u8*>(tr_event_array);
@@ -501,7 +624,8 @@ void CoverageData::DumpCallerCalleePairs() {
                  callee_module_address);
     }
   }
-  int fd = CovOpenFile(false, "caller-callee");
+  InternalScopedString path(kMaxPathLength);
+  int fd = CovOpenFile(&path, false, "caller-callee");
   if (fd < 0) return;
   internal_write(fd, out.data(), out.length());
   internal_close(fd);
@@ -521,86 +645,110 @@ void CoverageData::TraceBasicBlock(s32 *id) {
   tr_event_pointer++;
 }
 
-static void CovDumpAsBitSet() {
-  if (!common_flags()->coverage_bitset) return;
-  if (!coverage_data.size()) return;
-  int fd = CovOpenFile(/* packed */false, "combined", "bitset-sancov");
-  if (fd < 0) return;
-  uptr n = coverage_data.size();
-  uptr n_set_bits = 0;
-  InternalScopedBuffer<char> out(n);
-  for (uptr i = 0; i < n; i++) {
-    uptr pc = coverage_data.data()[i];
-    out[i] = pc ? '1' : '0';
-    if (pc)
-      n_set_bits++;
+void CoverageData::DumpCounters() {
+  if (!common_flags()->coverage_counters) return;
+  uptr n = coverage_data.GetNumberOf8bitCounters();
+  if (!n) return;
+  InternalScopedBuffer<u8> bitset(n);
+  coverage_data.Update8bitCounterBitsetAndClearCounters(bitset.data());
+  InternalScopedString path(kMaxPathLength);
+
+  for (uptr m = 0; m < module_name_vec.size(); m++) {
+    auto r = module_name_vec[m];
+    CHECK(r.name);
+    CHECK_LE(r.beg, r.end);
+    CHECK_LE(r.end, size());
+    const char *base_name = StripModuleName(r.name);
+    int fd =
+        CovOpenFile(&path, /* packed */ false, base_name, "counters-sancov");
+    if (fd < 0) return;
+    internal_write(fd, bitset.data() + r.beg, r.end - r.beg);
+    internal_close(fd);
+    VReport(1, " CovDump: %zd counters written for '%s'\n", r.end - r.beg,
+            base_name);
   }
-  internal_write(fd, out.data(), n);
-  internal_close(fd);
-  VReport(1, " CovDump: bitset of %zd bits written, %zd bits are set\n", n,
-          n_set_bits);
 }
 
-// Dump the coverage on disk.
-static void CovDump() {
-  if (!coverage_enabled || common_flags()->coverage_direct) return;
-#if !SANITIZER_WINDOWS
-  if (atomic_fetch_add(&dump_once_guard, 1, memory_order_relaxed))
-    return;
-  CovDumpAsBitSet();
-  coverage_data.DumpTrace();
-  if (!common_flags()->coverage_pcs) return;
-  uptr size = coverage_data.size();
-  InternalMmapVector<u32> offsets(size);
-  uptr *vb = coverage_data.data();
-  uptr *ve = vb + size;
-  SortArray(vb, size);
-  MemoryMappingLayout proc_maps(/*cache_enabled*/true);
-  uptr mb, me, off, prot;
-  InternalScopedString module(kMaxPathLength);
+void CoverageData::DumpAsBitSet() {
+  if (!common_flags()->coverage_bitset) return;
+  if (!size()) return;
+  InternalScopedBuffer<char> out(size());
   InternalScopedString path(kMaxPathLength);
-  for (int i = 0;
-       proc_maps.Next(&mb, &me, &off, module.data(), module.size(), &prot);
-       i++) {
-    if ((prot & MemoryMappingLayout::kProtectionExecute) == 0)
-      continue;
-    while (vb < ve && *vb < mb) vb++;
-    if (vb >= ve) break;
-    if (*vb < me) {
-      offsets.clear();
-      const uptr *old_vb = vb;
-      CHECK_LE(off, *vb);
-      for (; vb < ve && *vb < me; vb++) {
-        uptr diff = *vb - (i ? mb : 0) + off;
-        CHECK_LE(diff, 0xffffffffU);
-        offsets.push_back(static_cast<u32>(diff));
+  for (uptr m = 0; m < module_name_vec.size(); m++) {
+    uptr n_set_bits = 0;
+    auto r = module_name_vec[m];
+    CHECK(r.name);
+    CHECK_LE(r.beg, r.end);
+    CHECK_LE(r.end, size());
+    for (uptr i = r.beg; i < r.end; i++) {
+      uptr pc = data()[i];
+      out[i] = pc ? '1' : '0';
+      if (pc)
+        n_set_bits++;
+    }
+    const char *base_name = StripModuleName(r.name);
+    int fd = CovOpenFile(&path, /* packed */ false, base_name, "bitset-sancov");
+    if (fd < 0) return;
+    internal_write(fd, out.data() + r.beg, r.end - r.beg);
+    internal_close(fd);
+    VReport(1,
+            " CovDump: bitset of %zd bits written for '%s', %zd bits are set\n",
+            r.end - r.beg, base_name, n_set_bits);
+  }
+}
+
+void CoverageData::DumpOffsets() {
+  auto sym = Symbolizer::GetOrInit();
+  if (!common_flags()->coverage_pcs) return;
+  CHECK_NE(sym, nullptr);
+  InternalMmapVector<u32> offsets(0);
+  InternalScopedString path(kMaxPathLength);
+  for (uptr m = 0; m < module_name_vec.size(); m++) {
+    offsets.clear();
+    auto r = module_name_vec[m];
+    CHECK(r.name);
+    CHECK_LE(r.beg, r.end);
+    CHECK_LE(r.end, size());
+    const char *module_name = "<unknown>";
+    for (uptr i = r.beg; i < r.end; i++) {
+      uptr pc = data()[i];
+      if (!pc) continue; // Not visited.
+      uptr offset = 0;
+      sym->GetModuleNameAndOffsetForPC(pc, &module_name, &offset);
+      if (!offset || offset > 0xffffffffU) continue;
+      offsets.push_back(static_cast<u32>(offset));
+    }
+    module_name = StripModuleName(r.name);
+    if (cov_sandboxed) {
+      if (cov_fd >= 0) {
+        CovWritePacked(internal_getpid(), module_name, offsets.data(),
+                       offsets.size() * sizeof(u32));
+        VReport(1, " CovDump: %zd PCs written to packed file\n",
+                offsets.size());
       }
-      const char *module_name = StripModuleName(module.data());
-      if (cov_sandboxed) {
-        if (cov_fd >= 0) {
-          CovWritePacked(internal_getpid(), module_name, offsets.data(),
-                         offsets.size() * sizeof(u32));
-          VReport(1, " CovDump: %zd PCs written to packed file\n", vb - old_vb);
-        }
-      } else {
-        // One file per module per process.
-        path.clear();
-        path.append("%s/%s.%zd.sancov", coverage_dir, module_name,
-                    internal_getpid());
-        int fd = CovOpenFile(false /* packed */, module_name);
-        if (fd > 0) {
-          internal_write(fd, offsets.data(), offsets.size() * sizeof(u32));
-          internal_close(fd);
-          VReport(1, " CovDump: %s: %zd PCs written\n", path.data(),
-                  vb - old_vb);
-        }
-      }
+    } else {
+      // One file per module per process.
+      int fd = CovOpenFile(&path, false /* packed */, module_name);
+      if (fd < 0) continue;
+      internal_write(fd, offsets.data(), offsets.size() * sizeof(u32));
+      internal_close(fd);
+      VReport(1, " CovDump: %s: %zd PCs written\n", path.data(),
+              offsets.size());
     }
   }
   if (cov_fd >= 0)
     internal_close(cov_fd);
-  coverage_data.DumpCallerCalleePairs();
-#endif  // !SANITIZER_WINDOWS
+}
+
+void CoverageData::DumpAll() {
+  if (!coverage_enabled || common_flags()->coverage_direct) return;
+  if (atomic_fetch_add(&dump_once_guard, 1, memory_order_relaxed))
+    return;
+  DumpAsBitSet();
+  DumpCounters();
+  DumpTrace();
+  DumpOffsets();
+  DumpCallerCalleePairs();
 }
 
 void CovPrepareForSandboxing(__sanitizer_sandbox_arguments *args) {
@@ -610,15 +758,18 @@ void CovPrepareForSandboxing(__sanitizer_sandbox_arguments *args) {
   if (!cov_sandboxed) return;
   cov_fd = args->coverage_fd;
   cov_max_block_size = args->coverage_max_block_size;
-  if (cov_fd < 0)
+  if (cov_fd < 0) {
+    InternalScopedString path(kMaxPathLength);
     // Pre-open the file now. The sandbox won't allow us to do it later.
-    cov_fd = CovOpenFile(true /* packed */, 0);
+    cov_fd = CovOpenFile(&path, true /* packed */, 0);
+  }
 }
 
 int MaybeOpenCovFile(const char *name) {
   CHECK(name);
   if (!coverage_enabled) return -1;
-  return CovOpenFile(true /* packed */, name);
+  InternalScopedString path(kMaxPathLength);
+  return CovOpenFile(&path, true /* packed */, name);
 }
 
 void CovBeforeFork() {
@@ -674,10 +825,14 @@ SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_cov_init() {
   coverage_dir = common_flags()->coverage_dir;
   coverage_data.Init();
 }
-SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_cov_dump() { CovDump(); }
-SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_cov_module_init(s32 *guards,
-                                                               uptr npcs) {
-  coverage_data.InitializeGuards(guards, npcs);
+SANITIZER_INTERFACE_ATTRIBUTE void __sanitizer_cov_dump() {
+  coverage_data.DumpAll();
+}
+SANITIZER_INTERFACE_ATTRIBUTE void
+__sanitizer_cov_module_init(s32 *guards, uptr npcs, u8 *counters,
+                            const char *comp_unit_name) {
+  coverage_data.InitializeGuards(guards, npcs, comp_unit_name, GET_CALLER_PC());
+  coverage_data.InitializeCounters(counters, npcs);
   if (!common_flags()->coverage_direct) return;
   if (SANITIZER_ANDROID && coverage_enabled) {
     // dlopen/dlclose interceptors do not work on Android, so we rely on
@@ -714,5 +869,15 @@ SANITIZER_INTERFACE_ATTRIBUTE
 uptr __sanitizer_get_coverage_guards(uptr **data) {
   *data = coverage_data.data();
   return coverage_data.size();
+}
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __sanitizer_get_number_of_counters() {
+  return coverage_data.GetNumberOf8bitCounters();
+}
+
+SANITIZER_INTERFACE_ATTRIBUTE
+uptr __sanitizer_update_counter_bitset_and_clear_counters(u8 *bitset) {
+  return coverage_data.Update8bitCounterBitsetAndClearCounters(bitset);
 }
 }  // extern "C"

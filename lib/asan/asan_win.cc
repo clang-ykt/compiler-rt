@@ -27,12 +27,27 @@
 #include "sanitizer_common/sanitizer_mutex.h"
 
 extern "C" {
-  SANITIZER_INTERFACE_ATTRIBUTE
-  int __asan_should_detect_stack_use_after_return() {
-    __asan_init();
-    return __asan_option_detect_stack_use_after_return;
-  }
+SANITIZER_INTERFACE_ATTRIBUTE
+int __asan_should_detect_stack_use_after_return() {
+  __asan_init();
+  return __asan_option_detect_stack_use_after_return;
 }
+
+// We don't have a direct equivalent of weak symbols when using MSVC, but we can
+// use the /alternatename directive to tell the linker to default a specific
+// symbol to a specific value, which works nicely for allocator hooks and
+// __asan_default_options().
+void __sanitizer_default_malloc_hook(void *ptr, uptr size) { }
+void __sanitizer_default_free_hook(void *ptr) { }
+const char* __asan_default_default_options() { return ""; }
+const char* __asan_default_default_suppressions() { return ""; }
+void __asan_default_on_error() {}
+#pragma comment(linker, "/alternatename:___sanitizer_malloc_hook=___sanitizer_default_malloc_hook")  // NOLINT
+#pragma comment(linker, "/alternatename:___sanitizer_free_hook=___sanitizer_default_free_hook")      // NOLINT
+#pragma comment(linker, "/alternatename:___asan_default_options=___asan_default_default_options")    // NOLINT
+#pragma comment(linker, "/alternatename:___asan_default_suppressions=___asan_default_default_suppressions")    // NOLINT
+#pragma comment(linker, "/alternatename:___asan_on_error=___asan_default_on_error")                  // NOLINT
+}  // extern "C"
 
 namespace __asan {
 
@@ -92,23 +107,6 @@ void AsanOnSIGSEGV(int, void *siginfo, void *context) {
 }
 
 static LPTOP_LEVEL_EXCEPTION_FILTER default_seh_handler;
-
-SignalContext SignalContext::Create(void *siginfo, void *context) {
-  EXCEPTION_RECORD *exception_record = (EXCEPTION_RECORD*)siginfo;
-  CONTEXT *context_record = (CONTEXT*)context;
-
-  uptr pc = (uptr)exception_record->ExceptionAddress;
-#ifdef _WIN64
-  uptr bp = (uptr)context_record->Rbp;
-  uptr sp = (uptr)context_record->Rsp;
-#else
-  uptr bp = (uptr)context_record->Ebp;
-  uptr sp = (uptr)context_record->Esp;
-#endif
-  uptr access_addr = exception_record->ExceptionInformation[1];
-
-  return SignalContext(context, access_addr, pc, sp, bp);
-}
 
 static long WINAPI SEHHandler(EXCEPTION_POINTERS *info) {
   EXCEPTION_RECORD *exception_record = info->ExceptionRecord;

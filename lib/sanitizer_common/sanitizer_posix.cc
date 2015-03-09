@@ -20,6 +20,7 @@
 #include "sanitizer_procmaps.h"
 #include "sanitizer_stacktrace.h"
 
+#include <signal.h>
 #include <sys/mman.h>
 
 #if SANITIZER_LINUX
@@ -47,7 +48,7 @@ uptr GetMmapGranularity() {
 #if SANITIZER_WORDSIZE == 32
 // Take care of unusable kernel area in top gigabyte.
 static uptr GetKernelAreaSize() {
-#if SANITIZER_LINUX
+#if SANITIZER_LINUX && !SANITIZER_X32
   const uptr gbyte = 1UL << 30;
 
   // Firstly check if there are writable segments
@@ -79,7 +80,7 @@ static uptr GetKernelAreaSize() {
   return gbyte;
 #else
   return 0;
-#endif  // SANITIZER_LINUX
+#endif  // SANITIZER_LINUX && !SANITIZER_X32
 }
 #endif  // SANITIZER_WORDSIZE == 32
 
@@ -293,6 +294,14 @@ char *FindPathToBinary(const char *name) {
   return 0;
 }
 
+bool IsPathSeparator(const char c) {
+  return c == '/';
+}
+
+bool IsAbsolutePath(const char *path) {
+  return path != nullptr && IsPathSeparator(path[0]);
+}
+
 void ReportFile::Write(const char *buffer, uptr length) {
   SpinMutexLock l(mu);
   static const char *kWriteError =
@@ -317,6 +326,13 @@ bool GetCodeRangeForFile(const char *module, uptr *start, uptr *end) {
     }
   }
   return false;
+}
+
+SignalContext SignalContext::Create(void *siginfo, void *context) {
+  uptr addr = (uptr)((siginfo_t*)siginfo)->si_addr;
+  uptr pc, sp, bp;
+  GetPcSpBp(context, &pc, &sp, &bp);
+  return SignalContext(context, addr, pc, sp, bp);
 }
 
 }  // namespace __sanitizer

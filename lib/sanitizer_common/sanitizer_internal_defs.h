@@ -32,7 +32,7 @@
 # define SANITIZER_WEAK_ATTRIBUTE  __attribute__((weak))
 #endif
 
-#if SANITIZER_LINUX && !defined(SANITIZER_GO)
+#if (SANITIZER_LINUX || SANITIZER_WINDOWS) && !defined(SANITIZER_GO)
 # define SANITIZER_SUPPORTS_WEAK_HOOKS 1
 #else
 # define SANITIZER_SUPPORTS_WEAK_HOOKS 0
@@ -295,6 +295,7 @@ extern "C" void* _ReturnAddress(void);
   do {                                                             \
     volatile uptr enable_fp;                                       \
     enable_fp = GET_CURRENT_FRAME();                               \
+    (void)enable_fp;                                               \
   } while (0)
 
 #endif  // SANITIZER_DEFS_H

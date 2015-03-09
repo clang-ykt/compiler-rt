@@ -16,6 +16,7 @@
 #include "sanitizer_flags.h"
 #include "sanitizer_libc.h"
 #include "sanitizer_placement_new.h"
+#include "sanitizer_symbolizer.h"
 
 namespace __sanitizer {
 
@@ -206,12 +207,12 @@ const char *StripPathPrefix(const char *filepath,
                             const char *strip_path_prefix) {
   if (filepath == 0) return 0;
   if (strip_path_prefix == 0) return filepath;
-  const char *pos = internal_strstr(filepath, strip_path_prefix);
-  if (pos == 0) return filepath;
-  pos += internal_strlen(strip_path_prefix);
-  if (pos[0] == '.' && pos[1] == '/')
-    pos += 2;
-  return pos;
+  const char *res = filepath;
+  if (const char *pos = internal_strstr(filepath, strip_path_prefix))
+    res = pos + internal_strlen(strip_path_prefix);
+  if (res[0] == '.' && res[1] == '/')
+    res += 2;
+  return res;
 }
 
 const char *StripModuleName(const char *module) {
@@ -230,15 +231,18 @@ void ReportErrorSummary(const char *error_message) {
   __sanitizer_report_error_summary(buff.data());
 }
 
-void ReportErrorSummary(const char *error_type, const char *file,
-                        int line, const char *function) {
+void ReportErrorSummary(const char *error_type, const AddressInfo &info) {
   if (!common_flags()->print_summary)
     return;
   InternalScopedString buff(kMaxSummaryLength);
-  buff.append("%s %s:%d %s", error_type,
-              file ? StripPathPrefix(file, common_flags()->strip_path_prefix)
-                   : "??",
-              line, function ? function : "??");
+  buff.append(
+      "%s %s:%d", error_type,
+      info.file ? StripPathPrefix(info.file, common_flags()->strip_path_prefix)
+                : "??",
+      info.line);
+  if (info.column > 0)
+    buff.append(":%d", info.column);
+  buff.append(" %s", info.function ? info.function : "??");
   ReportErrorSummary(buff.data());
 }
 

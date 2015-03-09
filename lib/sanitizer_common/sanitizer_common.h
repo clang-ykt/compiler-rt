@@ -25,6 +25,7 @@
 
 namespace __sanitizer {
 struct StackTrace;
+struct AddressInfo;
 
 // Constants.
 const uptr kWordSize = SANITIZER_WORDSIZE / 8;
@@ -215,6 +216,11 @@ const char *GetEnv(const char *name);
 bool SetEnv(const char *name, const char *value);
 const char *GetPwd();
 char *FindPathToBinary(const char *name);
+bool IsPathSeparator(const char c);
+bool IsAbsolutePath(const char *path);
+
+// Returns the path to the main executable.
+uptr ReadBinaryName(/*out*/char *buf, uptr buf_len);
 u32 GetUid();
 void ReExec();
 bool StackSizeIsUnlimited();
@@ -288,9 +294,9 @@ const int kMaxSummaryLength = 1024;
 // and pass it to __sanitizer_report_error_summary.
 void ReportErrorSummary(const char *error_message);
 // Same as above, but construct error_message as:
-//   error_type file:line function
-void ReportErrorSummary(const char *error_type, const char *file,
-                        int line, const char *function);
+//   error_type file:line[:column][ function]
+void ReportErrorSummary(const char *error_type, const AddressInfo &info);
+// Same as above, but obtains AddressInfo by symbolizing top stack trace frame.
 void ReportErrorSummary(const char *error_type, StackTrace *trace);
 
 // Math
@@ -444,6 +450,7 @@ class InternalMmapVectorNoCtor {
   }
 
   void clear() { size_ = 0; }
+  bool empty() const { return size() == 0; }
 
  private:
   void Resize(uptr new_capacity) {
@@ -606,6 +613,23 @@ static inline void SanitizerBreakOptimization(void *arg) {
   __asm__ __volatile__("" : : "r" (arg) : "memory");
 #endif
 }
+
+struct SignalContext {
+  void *context;
+  uptr addr;
+  uptr pc;
+  uptr sp;
+  uptr bp;
+
+  SignalContext(void *context, uptr addr, uptr pc, uptr sp, uptr bp) :
+      context(context), addr(addr), pc(pc), sp(sp), bp(bp) {
+  }
+
+  // Creates signal context in a platform-specific manner.
+  static SignalContext Create(void *siginfo, void *context);
+};
+
+void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp);
 
 }  // namespace __sanitizer
 

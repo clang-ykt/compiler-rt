@@ -43,8 +43,7 @@ struct AddressInfo {
   AddressInfo();
   // Deletes all strings and resets all fields.
   void Clear();
-  void FillAddressAndModuleInfo(uptr addr, const char *mod_name,
-                                uptr mod_offset);
+  void FillModuleInfo(const char *mod_name, uptr mod_offset);
 };
 
 // Linked list of symbolized frames (each frame is described by AddressInfo).
@@ -90,6 +89,13 @@ class Symbolizer {
   virtual bool GetModuleNameAndOffsetForPC(uptr pc, const char **module_name,
                                            uptr *module_address) {
     return false;
+  }
+  const char *GetModuleNameForPc(uptr pc) {
+    const char *module_name = 0;
+    uptr unused;
+    if (GetModuleNameAndOffsetForPC(pc, &module_name, &unused))
+      return module_name;
+    return nullptr;
   }
   virtual bool CanReturnFileLineInfo() {
     return false;
