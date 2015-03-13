@@ -145,7 +145,10 @@ struct sigaction_t {
 const sighandler_t SIG_DFL = (sighandler_t)0;
 const sighandler_t SIG_IGN = (sighandler_t)1;
 const sighandler_t SIG_ERR = (sighandler_t)-1;
-#ifdef __mips__
+#if SANITIZER_FREEBSD
+const int SA_SIGINFO = 0x40;
+const int SIG_SETMASK = 3;
+#elif defined(__mips__)
 const int SA_SIGINFO = 8;
 const int SIG_SETMASK = 3;
 #else
@@ -797,6 +800,7 @@ TSAN_INTERCEPTOR(void*, mmap64, void *addr, long_t sz, int prot,
 TSAN_INTERCEPTOR(int, munmap, void *addr, long_t sz) {
   SCOPED_TSAN_INTERCEPTOR(munmap, addr, sz);
   DontNeedShadowFor((uptr)addr, sz);
+  ctx->metamap.ResetRange(thr, pc, (uptr)addr, (uptr)sz);
   int res = REAL(munmap)(addr, sz);
   return res;
 }
@@ -1948,8 +1952,8 @@ void ProcessPendingSignals(ThreadState *thr) {
   atomic_fetch_add(&thr->in_signal_handler, 1, memory_order_relaxed);
   // These are too big for stack.
   static THREADLOCAL __sanitizer_sigset_t emptyset, oldset;
-  REAL(sigfillset)(&emptyset);
-  pthread_sigmask(SIG_SETMASK, &emptyset, &oldset);
+  CHECK_EQ(0, REAL(sigfillset)(&emptyset));
+  CHECK_EQ(0, pthread_sigmask(SIG_SETMASK, &emptyset, &oldset));
   for (int sig = 0; sig < kSigCount; sig++) {
     SignalDesc *signal = &sctx->pending_signals[sig];
     if (signal->armed) {
@@ -1958,7 +1962,7 @@ void ProcessPendingSignals(ThreadState *thr) {
           &signal->siginfo, &signal->ctx);
     }
   }
-  pthread_sigmask(SIG_SETMASK, &oldset, 0);
+  CHECK_EQ(0, pthread_sigmask(SIG_SETMASK, &oldset, 0));
   atomic_fetch_add(&thr->in_signal_handler, -1, memory_order_relaxed);
 }
 
