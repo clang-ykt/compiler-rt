@@ -23,6 +23,7 @@
 #include "sanitizer_procmaps.h"
 #include "sanitizer_symbolizer_internal.h"
 #include "sanitizer_symbolizer_libbacktrace.h"
+#include "sanitizer_symbolizer_mac.h"
 
 #include <unistd.h>
 
@@ -38,7 +39,7 @@ namespace __cxxabiv1 {
 namespace __sanitizer {
 
 // Attempts to demangle the name via __cxa_demangle from __cxxabiv1.
-static const char *DemangleCXXABI(const char *name) {
+const char *DemangleCXXABI(const char *name) {
   // FIXME: __cxa_demangle aggressively insists on allocating memory.
   // There's not much we can do about that, short of providing our
   // own demangler (libc++abi's implementation could be adapted so that
@@ -351,7 +352,7 @@ class InternalSymbolizer : public SymbolizerTool {
 class POSIXSymbolizer : public Symbolizer {
  public:
   explicit POSIXSymbolizer(IntrusiveList<SymbolizerTool> tools)
-      : Symbolizer(tools) {}
+      : Symbolizer(tools), n_modules_(0), modules_fresh_(false) {}
 
  private:
   const char *PlatformDemangle(const char *name) override {
@@ -367,10 +368,9 @@ class POSIXSymbolizer : public Symbolizer {
 
   LoadedModule *FindModuleForAddress(uptr address) {
     bool modules_were_reloaded = false;
-    if (modules_ == 0 || !modules_fresh_) {
-      modules_ = (LoadedModule*)(symbolizer_allocator_.Allocate(
-          kMaxNumberOfModuleContexts * sizeof(LoadedModule)));
-      CHECK(modules_);
+    if (!modules_fresh_) {
+      for (uptr i = 0; i < n_modules_; i++)
+        modules_[i].clear();
       n_modules_ = GetListOfModules(modules_, kMaxNumberOfModuleContexts,
                                     /* filter */ 0);
       CHECK_GT(n_modules_, 0);
@@ -407,55 +407,93 @@ class POSIXSymbolizer : public Symbolizer {
 
   // 16K loaded modules should be enough for everyone.
   static const uptr kMaxNumberOfModuleContexts = 1 << 14;
-  LoadedModule *modules_;  // Array of module descriptions is leaked.
+  LoadedModule modules_[kMaxNumberOfModuleContexts];
   uptr n_modules_;
   // If stale, need to reload the modules before looking up addresses.
   bool modules_fresh_;
 };
 
-static SymbolizerTool *ChooseSymbolizer(LowLevelAllocator *allocator) {
+static SymbolizerTool *ChooseExternalSymbolizer(LowLevelAllocator *allocator) {
+  const char *path = common_flags()->external_symbolizer_path;
+  const char *binary_name = path ? StripModuleName(path) : "";
+  if (path && path[0] == '\0') {
+    VReport(2, "External symbolizer is explicitly disabled.\n");
+    return nullptr;
+  } else if (!internal_strcmp(binary_name, "llvm-symbolizer")) {
+    VReport(2, "Using llvm-symbolizer at user-specified path: %s\n", path);
+    return new(*allocator) LLVMSymbolizer(path, allocator);
+  } else if (!internal_strcmp(binary_name, "atos")) {
+#if SANITIZER_MAC
+    VReport(2, "Using atos at user-specified path: %s\n", path);
+    return new(*allocator) AtosSymbolizer(path, allocator);
+#else  // SANITIZER_MAC
+    Report("ERROR: Using `atos` is only supported on Darwin.\n");
+    Die();
+#endif  // SANITIZER_MAC
+  } else if (!internal_strcmp(binary_name, "addr2line")) {
+    VReport(2, "Using addr2line at user-specified path: %s\n", path);
+    return new(*allocator) Addr2LinePool(path, allocator);
+  } else if (path) {
+    Report("ERROR: External symbolizer path is set to '%s' which isn't "
+           "a known symbolizer. Please set the path to the llvm-symbolizer "
+           "binary or other known tool.\n", path);
+    Die();
+  }
+
+  // Otherwise symbolizer program is unknown, let's search $PATH
+  CHECK(path == nullptr);
+  if (const char *found_path = FindPathToBinary("llvm-symbolizer")) {
+    VReport(2, "Using llvm-symbolizer found at: %s\n", found_path);
+    return new(*allocator) LLVMSymbolizer(found_path, allocator);
+  }
+#if SANITIZER_MAC
+  if (const char *found_path = FindPathToBinary("atos")) {
+    VReport(2, "Using atos found at: %s\n", found_path);
+    return new(*allocator) AtosSymbolizer(found_path, allocator);
+  }
+#endif  // SANITIZER_MAC
+  if (common_flags()->allow_addr2line) {
+    if (const char *found_path = FindPathToBinary("addr2line")) {
+      VReport(2, "Using addr2line found at: %s\n", found_path);
+      return new(*allocator) Addr2LinePool(found_path, allocator);
+    }
+  }
+  return nullptr;
+}
+
+static void ChooseSymbolizerTools(IntrusiveList<SymbolizerTool> *list,
+                                  LowLevelAllocator *allocator) {
   if (!common_flags()->symbolize) {
     VReport(2, "Symbolizer is disabled.\n");
-    return nullptr;
+    return;
   }
   if (SymbolizerTool *tool = InternalSymbolizer::get(allocator)) {
     VReport(2, "Using internal symbolizer.\n");
-    return tool;
+    list->push_back(tool);
+    return;
   }
   if (SymbolizerTool *tool = LibbacktraceSymbolizer::get(allocator)) {
     VReport(2, "Using libbacktrace symbolizer.\n");
-    return tool;
+    list->push_back(tool);
+    return;
   }
-  const char *path_to_external = common_flags()->external_symbolizer_path;
-  if (path_to_external && path_to_external[0] == '\0') {
-    // External symbolizer is explicitly disabled. Do nothing.
-    return nullptr;
+
+  if (SymbolizerTool *tool = ChooseExternalSymbolizer(allocator)) {
+    list->push_back(tool);
+  } else {
+    VReport(2, "No internal or external symbolizer found.\n");
   }
-  // Find path to llvm-symbolizer if it's not provided.
-  if (!path_to_external) {
-    path_to_external = FindPathToBinary("llvm-symbolizer");
-  }
-  if (path_to_external) {
-    VReport(2, "Using llvm-symbolizer at path: %s\n", path_to_external);
-    return new(*allocator) LLVMSymbolizer(path_to_external, allocator);
-  }
-  if (common_flags()->allow_addr2line) {
-    // If llvm-symbolizer is not found, try to use addr2line.
-    if (const char *addr2line_path = FindPathToBinary("addr2line")) {
-      VReport(2, "Using addr2line at path: %s\n", addr2line_path);
-      return new(*allocator) Addr2LinePool(addr2line_path, allocator);
-    }
-  }
-  VReport(2, "No internal or external symbolizer found.\n");
-  return nullptr;
+
+#if SANITIZER_MAC
+  VReport(2, "Using dladdr symbolizer.\n");
+  list->push_back(new(*allocator) DlAddrSymbolizer());
+#endif  // SANITIZER_MAC
 }
 
 Symbolizer *Symbolizer::PlatformInit() {
   IntrusiveList<SymbolizerTool> list;
   list.clear();
-  if (SymbolizerTool *tool = ChooseSymbolizer(&symbolizer_allocator_)) {
-    list.push_back(tool);
-  }
+  ChooseSymbolizerTools(&list, &symbolizer_allocator_);
   return new(symbolizer_allocator_) POSIXSymbolizer(list);
 }
 

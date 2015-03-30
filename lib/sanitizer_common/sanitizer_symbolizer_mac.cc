@@ -16,6 +16,7 @@
 #if SANITIZER_MAC
 
 #include "sanitizer_allocator_internal.h"
+#include "sanitizer_mac.h"
 #include "sanitizer_symbolizer_mac.h"
 
 namespace __sanitizer {
@@ -31,7 +32,8 @@ bool DlAddrSymbolizer::SymbolizePC(uptr addr, SymbolizedStack *stack) {
   Dl_info info;
   int result = dladdr((const void *)addr, &info);
   if (!result) return false;
-  stack->info.function = internal_strdup(info.dli_sname);
+  const char *demangled = DemangleCXXABI(info.dli_sname);
+  stack->info.function = internal_strdup(demangled);
   return true;
 }
 
@@ -56,7 +58,14 @@ class AtosSymbolizerProcess : public SymbolizerProcess {
 
     char pid_str[16];
     internal_snprintf(pid_str, sizeof(pid_str), "%d", parent_pid_);
-    execl(path_to_binary, path_to_binary, "-p", pid_str, (char *)0);
+    if (GetMacosVersion() == MACOS_VERSION_MAVERICKS) {
+      // On Mavericks atos prints a deprecation warning which we suppress by
+      // passing -d. The warning isn't present on other OSX versions, even the
+      // newer ones.
+      execl(path_to_binary, path_to_binary, "-p", pid_str, "-d", (char *)0);
+    } else {
+      execl(path_to_binary, path_to_binary, "-p", pid_str, (char *)0);
+    }
   }
 
   pid_t parent_pid_;

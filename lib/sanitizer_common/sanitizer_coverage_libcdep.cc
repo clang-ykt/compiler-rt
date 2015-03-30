@@ -95,7 +95,6 @@ class CoverageData {
   void InitializeGuardArray(s32 *guards);
   void InitializeGuards(s32 *guards, uptr n, const char *module_name,
                         uptr caller_pc);
-  void UpdateModuleNameVec(uptr caller_pc, uptr range_beg, uptr range_end);
   void InitializeCounters(u8 *counters, uptr n);
   void ReinitializeGuards();
   uptr GetNumberOf8bitCounters();
@@ -105,6 +104,9 @@ class CoverageData {
   uptr size();
 
  private:
+  void DirectOpen();
+  void UpdateModuleNameVec(uptr caller_pc, uptr range_beg, uptr range_end);
+
   // Maximal size pc array may ever grow.
   // We MmapNoReserve this space to ensure that the array is contiguous.
   static const uptr kPcArrayMaxSize = FIRST_32_SECOND_64(1 << 26, 1 << 27);
@@ -127,7 +129,7 @@ class CoverageData {
   InternalMmapVectorNoCtor<s32*> guard_array_vec;
 
   struct NamedPcRange {
-    const char *name;
+    const char *copied_module_name;
     uptr beg, end; // elements [beg,end) in pc_array.
   };
 
@@ -163,8 +165,6 @@ class CoverageData {
   static const uptr kTrPcArrayMaxSize    = FIRST_32_SECOND_64(1 << 22, 1 << 27);
 
   StaticSpinMutex mu;
-
-  void DirectOpen();
 };
 
 static CoverageData coverage_data;
@@ -175,9 +175,9 @@ void CoverageData::DirectOpen() {
   InternalScopedString path(kMaxPathLength);
   internal_snprintf((char *)path.data(), path.size(), "%s/%zd.sancov.raw",
                     coverage_dir, internal_getpid());
-  pc_fd = OpenFile(path.data(), true);
+  pc_fd = OpenFile(path.data(), RdWr);
   if (internal_iserror(pc_fd)) {
-    Report(" Coverage: failed to open %s for writing\n", path.data());
+    Report(" Coverage: failed to open %s for reading/writing\n", path.data());
     Die();
   }
 
@@ -337,8 +337,10 @@ void CoverageData::UpdateModuleNameVec(uptr caller_pc, uptr range_beg,
     return;
   const char *module_name = sym->GetModuleNameForPc(caller_pc);
   if (!module_name) return;
-  if (module_name_vec.empty() || module_name_vec.back().name != module_name)
-    module_name_vec.push_back({module_name, range_beg, range_end});
+  if (module_name_vec.empty() ||
+      internal_strcmp(module_name_vec.back().copied_module_name, module_name))
+    module_name_vec.push_back(
+        {internal_strdup(module_name), range_beg, range_end});
   else
     module_name_vec.back().end = range_end;
 }
@@ -569,7 +571,7 @@ static int CovOpenFile(InternalScopedString *path, bool packed,
     else
       path->append("%s/%s.%s.packed", coverage_dir, name, extension);
   }
-  uptr fd = OpenFile(path->data(), true);
+  uptr fd = OpenFile(path->data(), WrOnly);
   if (internal_iserror(fd)) {
     Report(" SanitizerCoverage: failed to open %s for writing\n", path->data());
     return -1;
@@ -602,7 +604,7 @@ void CoverageData::DumpTrace() {
   if (fd < 0) return;
   out.clear();
   for (uptr i = 0; i < comp_unit_name_vec.size(); i++)
-    out.append("%s\n", comp_unit_name_vec[i].name);
+    out.append("%s\n", comp_unit_name_vec[i].copied_module_name);
   internal_write(fd, out.data(), out.length());
   internal_close(fd);
 
@@ -688,10 +690,10 @@ void CoverageData::DumpCounters() {
 
   for (uptr m = 0; m < module_name_vec.size(); m++) {
     auto r = module_name_vec[m];
-    CHECK(r.name);
+    CHECK(r.copied_module_name);
     CHECK_LE(r.beg, r.end);
     CHECK_LE(r.end, size());
-    const char *base_name = StripModuleName(r.name);
+    const char *base_name = StripModuleName(r.copied_module_name);
     int fd =
         CovOpenFile(&path, /* packed */ false, base_name, "counters-sancov");
     if (fd < 0) return;
@@ -710,7 +712,7 @@ void CoverageData::DumpAsBitSet() {
   for (uptr m = 0; m < module_name_vec.size(); m++) {
     uptr n_set_bits = 0;
     auto r = module_name_vec[m];
-    CHECK(r.name);
+    CHECK(r.copied_module_name);
     CHECK_LE(r.beg, r.end);
     CHECK_LE(r.end, size());
     for (uptr i = r.beg; i < r.end; i++) {
@@ -719,7 +721,7 @@ void CoverageData::DumpAsBitSet() {
       if (pc)
         n_set_bits++;
     }
-    const char *base_name = StripModuleName(r.name);
+    const char *base_name = StripModuleName(r.copied_module_name);
     int fd = CovOpenFile(&path, /* packed */ false, base_name, "bitset-sancov");
     if (fd < 0) return;
     internal_write(fd, out.data() + r.beg, r.end - r.beg);
@@ -742,16 +744,16 @@ void CoverageData::DumpOffsets() {
     for (uptr i = 0; i < num_words_for_magic; i++)
       offsets.push_back(0);
     auto r = module_name_vec[m];
-    CHECK(r.name);
+    CHECK(r.copied_module_name);
     CHECK_LE(r.beg, r.end);
     CHECK_LE(r.end, size());
-    const char *module_name = "<unknown>";
     for (uptr i = r.beg; i < r.end; i++) {
       uptr pc = UnbundlePc(pc_array[i]);
       uptr counter = UnbundleCounter(pc_array[i]);
       if (!pc) continue; // Not visited.
+      const char *unused;
       uptr offset = 0;
-      sym->GetModuleNameAndOffsetForPC(pc, &module_name, &offset);
+      sym->GetModuleNameAndOffsetForPC(pc, &unused, &offset);
       offsets.push_back(BundlePcAndCounter(offset, counter));
     }
 
@@ -767,7 +769,7 @@ void CoverageData::DumpOffsets() {
     // if all the offsets are small enough.
     *magic_p = SANITIZER_WORDSIZE == 64 ? kMagic64 : kMagic32;
 
-    module_name = StripModuleName(r.name);
+    const char *module_name = StripModuleName(r.copied_module_name);
     if (cov_sandboxed) {
       if (cov_fd >= 0) {
         CovWritePacked(internal_getpid(), module_name, offsets.data(),

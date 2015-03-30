@@ -187,7 +187,13 @@ extern ReportFile report_file;
 extern uptr stoptheworld_tracer_pid;
 extern uptr stoptheworld_tracer_ppid;
 
-uptr OpenFile(const char *filename, bool write);
+enum FileAccessMode {
+  RdOnly,
+  WrOnly,
+  RdWr
+};
+
+uptr OpenFile(const char *filename, FileAccessMode mode);
 // Opens the file 'file_name" and reads up to 'max_len' bytes.
 // The resulting buffer is mmaped and stored in '*buff'.
 // The size of the mmaped region is stored in '*buff_size',
@@ -542,6 +548,7 @@ uptr InternalBinarySearch(const Container &v, uptr first, uptr last,
 // executable or a shared object).
 class LoadedModule {
  public:
+  LoadedModule() : full_name_(nullptr), base_address_(0) {}
   LoadedModule(const char *module_name, uptr base_address);
   void clear();
   void addAddressRange(uptr beg, uptr end, bool executable);
