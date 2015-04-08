@@ -219,8 +219,15 @@ const char *StripPathPrefix(const char *filepath,
 const char *StripModuleName(const char *module) {
   if (module == 0)
     return 0;
-  if (const char *slash_pos = internal_strrchr(module, '/'))
+  if (SANITIZER_WINDOWS) {
+    // On Windows, both slash and backslash are possible.
+    // Pick the one that goes last.
+    if (const char *bslash_pos = internal_strrchr(module, '\\'))
+      return StripModuleName(bslash_pos + 1);
+  }
+  if (const char *slash_pos = internal_strrchr(module, '/')) {
     return slash_pos + 1;
+  }
   return module;
 }
 
@@ -243,14 +250,15 @@ void ReportErrorSummary(const char *error_type, const AddressInfo &info) {
 }
 #endif
 
-LoadedModule::LoadedModule(const char *module_name, uptr base_address) {
+void LoadedModule::set(const char *module_name, uptr base_address) {
+  clear();
   full_name_ = internal_strdup(module_name);
   base_address_ = base_address;
-  ranges_.clear();
 }
 
 void LoadedModule::clear() {
   InternalFree(full_name_);
+  full_name_ = nullptr;
   while (!ranges_.empty()) {
     AddressRange *r = ranges_.front();
     ranges_.pop_front();

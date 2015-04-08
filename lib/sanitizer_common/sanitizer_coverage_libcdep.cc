@@ -109,7 +109,8 @@ class CoverageData {
 
   // Maximal size pc array may ever grow.
   // We MmapNoReserve this space to ensure that the array is contiguous.
-  static const uptr kPcArrayMaxSize = FIRST_32_SECOND_64(1 << 26, 1 << 27);
+  static const uptr kPcArrayMaxSize =
+      FIRST_32_SECOND_64(1 << (SANITIZER_ANDROID ? 24 : 26), 1 << 27);
   // The amount file mapping for the pc array is grown by.
   static const uptr kPcArrayMmapSize = 64 * 1024;
 
@@ -177,7 +178,7 @@ void CoverageData::DirectOpen() {
                     coverage_dir, internal_getpid());
   pc_fd = OpenFile(path.data(), RdWr);
   if (internal_iserror(pc_fd)) {
-    Report(" Coverage: failed to open %s for reading/writing\n", path.data());
+    Report("Coverage: failed to open %s for reading/writing\n", path.data());
     Die();
   }
 
@@ -338,9 +339,8 @@ void CoverageData::UpdateModuleNameVec(uptr caller_pc, uptr range_beg,
   const char *module_name = sym->GetModuleNameForPc(caller_pc);
   if (!module_name) return;
   if (module_name_vec.empty() ||
-      internal_strcmp(module_name_vec.back().copied_module_name, module_name))
-    module_name_vec.push_back(
-        {internal_strdup(module_name), range_beg, range_end});
+      module_name_vec.back().copied_module_name != module_name)
+    module_name_vec.push_back({module_name, range_beg, range_end});
   else
     module_name_vec.back().end = range_end;
 }
@@ -573,7 +573,7 @@ static int CovOpenFile(InternalScopedString *path, bool packed,
   }
   uptr fd = OpenFile(path->data(), WrOnly);
   if (internal_iserror(fd)) {
-    Report(" SanitizerCoverage: failed to open %s for writing\n", path->data());
+    Report("SanitizerCoverage: failed to open %s for writing\n", path->data());
     return -1;
   }
   return fd;
@@ -751,9 +751,8 @@ void CoverageData::DumpOffsets() {
       uptr pc = UnbundlePc(pc_array[i]);
       uptr counter = UnbundleCounter(pc_array[i]);
       if (!pc) continue; // Not visited.
-      const char *unused;
       uptr offset = 0;
-      sym->GetModuleNameAndOffsetForPC(pc, &unused, &offset);
+      sym->GetModuleNameAndOffsetForPC(pc, nullptr, &offset);
       offsets.push_back(BundlePcAndCounter(offset, counter));
     }
 
@@ -836,9 +835,7 @@ void InitializeCoverage(bool enabled, const char *dir) {
   coverage_dir = dir;
   coverage_data.Init();
   if (enabled) coverage_data.Enable();
-#if !SANITIZER_WINDOWS
   if (!common_flags()->coverage_direct) Atexit(__sanitizer_cov_dump);
-#endif
 }
 
 void ReInitializeCoverage(bool enabled, const char *dir) {
