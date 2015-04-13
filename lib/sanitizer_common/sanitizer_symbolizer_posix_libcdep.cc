@@ -129,13 +129,13 @@ class LLVMSymbolizerProcess : public SymbolizerProcess {
   explicit LLVMSymbolizerProcess(const char *path) : SymbolizerProcess(path) {}
 
  private:
-  bool ReachedEndOfOutput(const char *buffer, uptr length) const {
+  bool ReachedEndOfOutput(const char *buffer, uptr length) const override {
     // Empty line marks the end of llvm-symbolizer output.
     return length >= 2 && buffer[length - 1] == '\n' &&
            buffer[length - 2] == '\n';
   }
 
-  void ExecuteWithDefaultArgs(const char *path_to_binary) const {
+  void ExecuteWithDefaultArgs(const char *path_to_binary) const override {
 #if defined(__x86_64__)
     const char* const kSymbolizerArch = "--default-arch=x86_64";
 #elif defined(__i386__)
@@ -202,7 +202,7 @@ class Addr2LineProcess : public SymbolizerProcess {
   const char *module_name() const { return module_name_; }
 
  private:
-  bool ReachedEndOfOutput(const char *buffer, uptr length) const {
+  bool ReachedEndOfOutput(const char *buffer, uptr length) const override {
     // Output should consist of two lines.
     int num_lines = 0;
     for (uptr i = 0; i < length; ++i) {
@@ -214,7 +214,7 @@ class Addr2LineProcess : public SymbolizerProcess {
     return false;
   }
 
-  void ExecuteWithDefaultArgs(const char *path_to_binary) const {
+  void ExecuteWithDefaultArgs(const char *path_to_binary) const override {
     execl(path_to_binary, path_to_binary, "-Cfe", module_name_, (char *)0);
   }
 
@@ -349,28 +349,16 @@ class InternalSymbolizer : public SymbolizerTool {
 
 #endif  // SANITIZER_SUPPORTS_WEAK_HOOKS
 
-class POSIXSymbolizer : public Symbolizer {
- public:
-  explicit POSIXSymbolizer(IntrusiveList<SymbolizerTool> tools)
-      : Symbolizer(tools) {}
+const char *Symbolizer::PlatformDemangle(const char *name) {
+  return DemangleCXXABI(name);
+}
 
- private:
-  uptr PlatformGetListOfModules(LoadedModule *modules,
-                                uptr max_modules) override {
-    return ::GetListOfModules(modules, max_modules, /* filter */ nullptr);
-  }
-
-  const char *PlatformDemangle(const char *name) override {
-    return DemangleCXXABI(name);
-  }
-
-  void PlatformPrepareForSandboxing() override {
+void Symbolizer::PlatformPrepareForSandboxing() {
 #if SANITIZER_LINUX && !SANITIZER_ANDROID
-    // Cache /proc/self/exe on Linux.
-    CacheBinaryName();
+  // Cache /proc/self/exe on Linux.
+  CacheBinaryName();
 #endif
-  }
-};
+}
 
 static SymbolizerTool *ChooseExternalSymbolizer(LowLevelAllocator *allocator) {
   const char *path = common_flags()->external_symbolizer_path;
@@ -453,7 +441,7 @@ Symbolizer *Symbolizer::PlatformInit() {
   IntrusiveList<SymbolizerTool> list;
   list.clear();
   ChooseSymbolizerTools(&list, &symbolizer_allocator_);
-  return new(symbolizer_allocator_) POSIXSymbolizer(list);
+  return new(symbolizer_allocator_) Symbolizer(list);
 }
 
 }  // namespace __sanitizer

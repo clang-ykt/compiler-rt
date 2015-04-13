@@ -75,7 +75,7 @@ struct DataInfo {
 
 class SymbolizerTool;
 
-class Symbolizer {
+class Symbolizer final {
  public:
   /// Initialize and return platform-specific implementation of symbolizer
   /// (if it wasn't already initialized).
@@ -140,21 +140,14 @@ class Symbolizer {
   bool FindModuleNameAndOffsetForAddress(uptr address, const char **module_name,
                                          uptr *module_offset);
   LoadedModule *FindModuleForAddress(uptr address);
-  // FIXME: get rid of this virtual method, just use GetListOfModules directly.
-  // The only reason we don't do it right away is that GetListOfModules is
-  // currently implemented in a libcdep file.
-  virtual uptr PlatformGetListOfModules(LoadedModule *modules,
-                                        uptr max_modules) {
-    UNIMPLEMENTED();
-  }
   LoadedModule modules_[kMaxNumberOfModules];
   uptr n_modules_;
   // If stale, need to reload the modules before looking up addresses.
   bool modules_fresh_;
 
   // Platform-specific default demangler, must not return nullptr.
-  virtual const char *PlatformDemangle(const char *name) { UNIMPLEMENTED(); }
-  virtual void PlatformPrepareForSandboxing() { UNIMPLEMENTED(); }
+  const char *PlatformDemangle(const char *name);
+  void PlatformPrepareForSandboxing();
 
   static Symbolizer *symbolizer_;
   static StaticSpinMutex init_mu_;
@@ -167,7 +160,6 @@ class Symbolizer {
   typedef IntrusiveList<SymbolizerTool>::Iterator Iterator;
   IntrusiveList<SymbolizerTool> tools_;
 
- protected:
   explicit Symbolizer(IntrusiveList<SymbolizerTool> tools);
 
   static LowLevelAllocator symbolizer_allocator_;

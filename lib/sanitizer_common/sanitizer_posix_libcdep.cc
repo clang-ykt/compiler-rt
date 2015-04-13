@@ -18,6 +18,7 @@
 #include "sanitizer_common.h"
 #include "sanitizer_flags.h"
 #include "sanitizer_platform_limits_posix.h"
+#include "sanitizer_posix.h"
 #include "sanitizer_procmaps.h"
 #include "sanitizer_stacktrace.h"
 #include "sanitizer_symbolizer.h"
@@ -121,8 +122,8 @@ int Atexit(void (*function)(void)) {
 #endif
 }
 
-int internal_isatty(fd_t fd) {
-  return isatty(fd);
+bool SupportsColoredOutput(fd_t fd) {
+  return isatty(fd) != 0;
 }
 
 #ifndef SANITIZER_GO

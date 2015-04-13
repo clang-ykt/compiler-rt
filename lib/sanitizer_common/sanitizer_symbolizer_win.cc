@@ -129,26 +129,19 @@ const char *WinSymbolizerTool::Demangle(const char *name) {
     return name;
 }
 
-// TODO(kuba.brecka): To be merged with POSIXSymbolizer.
-class WinSymbolizer : public Symbolizer {
- public:
-  explicit WinSymbolizer(IntrusiveList<SymbolizerTool> tools)
-      : Symbolizer(tools) {}
+const char *Symbolizer::PlatformDemangle(const char *name) {
+  return name;
+}
 
- private:
-  uptr PlatformGetListOfModules(LoadedModule *modules,
-                                uptr max_modules) override {
-    return ::GetListOfModules(modules, max_modules, /* filter */ nullptr);
-  }
-  const char *PlatformDemangle(const char *name) override { return name; }
-  void PlatformPrepareForSandboxing() override { }
-};
+void Symbolizer::PlatformPrepareForSandboxing() {
+  // Do nothing.
+}
 
 Symbolizer *Symbolizer::PlatformInit() {
   IntrusiveList<SymbolizerTool> list;
   list.clear();
   list.push_back(new(symbolizer_allocator_) WinSymbolizerTool());
-  return new(symbolizer_allocator_) WinSymbolizer(list);
+  return new(symbolizer_allocator_) Symbolizer(list);
 }
 
 }  // namespace __sanitizer
