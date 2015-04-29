@@ -109,8 +109,9 @@ class CoverageData {
 
   // Maximal size pc array may ever grow.
   // We MmapNoReserve this space to ensure that the array is contiguous.
-  static const uptr kPcArrayMaxSize =
-      FIRST_32_SECOND_64(1 << (SANITIZER_ANDROID ? 24 : 26), 1 << 27);
+  static const uptr kPcArrayMaxSize = FIRST_32_SECOND_64(
+      1 << (SANITIZER_ANDROID ? 24 : (SANITIZER_WINDOWS ? 27 : 26)),
+      1 << 27);
   // The amount file mapping for the pc array is grown by.
   static const uptr kPcArrayMmapSize = 64 * 1024;
 
@@ -571,9 +572,11 @@ static fd_t CovOpenFile(InternalScopedString *path, bool packed,
     else
       path->append("%s/%s.%s.packed", coverage_dir, name, extension);
   }
-  fd_t fd = OpenFile(path->data(), WrOnly);
+  error_t err;
+  fd_t fd = OpenFile(path->data(), WrOnly, &err);
   if (fd == kInvalidFd)
-    Report("SanitizerCoverage: failed to open %s for writing\n", path->data());
+    Report("SanitizerCoverage: failed to open %s for writing (reason: %d)\n",
+           path->data(), err);
   return fd;
 }
 
