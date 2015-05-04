@@ -1,7 +1,11 @@
-// RUN: %clang_profgen -o %t -O3 %s
-// RUN: %run %t %t.profraw
-// RUN: llvm-profdata merge -o %t.profdata default.profraw
-// RUN: %clang_profuse=%t.profdata -o - -S -emit-llvm %s | FileCheck %s
+// RUN: rm -rf %t.d
+// RUN: mkdir -p %t.d
+// RUN: cd %t.d
+// RUN: %clang_profgen -O3 %s -o %t.out
+// RUN: %run %t.out %t.d/bad.profraw
+// RUN: llvm-profdata merge -o %t.d/default.profdata %t.d/default.profraw
+// RUN: %clang_profuse=%t.d/default.profdata -o - -S -emit-llvm %s | FileCheck %s
+
 
 void __llvm_profile_override_default_filename(const char *);
 int main(int argc, const char *argv[]) {
