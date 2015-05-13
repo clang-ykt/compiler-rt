@@ -24,7 +24,7 @@
 // The "missing from foo" set may contain a few bogus PCs from the sanitizer
 // runtime, but it must include the entire "bar" code path as a subset. Sorted
 // lists can be tested for set inclusion with diff + grep.
-// RUN: diff bar.txt foo-missing-with-main.txt | not grep "^<"
+// RUN: ( diff bar.txt foo-missing-with-main.txt || true ) | not grep "^<"
 
 // Second case: coverage from DSO.
 // cd %T
@@ -43,7 +43,7 @@
 // RUN: rm *.sancov
 // RUN: [ $(cat bar.txt | wc -l) == 3 ]
 // RUN: %sancov missing %dynamiclib < foo.txt > foo-missing.txt
-// RUN: diff bar.txt foo-missing.txt | not grep "^<"
+// RUN: ( diff bar.txt foo-missing.txt || true ) | not grep "^<"
 
 // REQUIRES: x86_64-supported-target, i386-supported-target
 // XFAIL: android
