@@ -23,6 +23,11 @@
 #include "sanitizer_list.h"
 #include "sanitizer_mutex.h"
 
+#ifdef _MSC_VER
+extern "C" void _ReadWriteBarrier();
+#pragma intrinsic(_ReadWriteBarrier)
+#endif
+
 namespace __sanitizer {
 struct StackTrace;
 struct AddressInfo;
@@ -383,7 +388,7 @@ INLINE uptr RoundUpToPowerOfTwo(uptr size) {
   uptr up = MostSignificantSetBitIndex(size);
   CHECK(size < (1ULL << (up + 1)));
   CHECK(size > (1ULL << up));
-  return 1UL << (up + 1);
+  return 1ULL << (up + 1);
 }
 
 INLINE uptr RoundUpTo(uptr size, uptr boundary) {
@@ -659,8 +664,7 @@ void MaybeStartBackgroudThread();
 // memset/memcpy/etc.
 static inline void SanitizerBreakOptimization(void *arg) {
 #if _MSC_VER
-  // FIXME: make sure this is actually enough.
-  __asm;
+  _ReadWriteBarrier();
 #else
   __asm__ __volatile__("" : : "r" (arg) : "memory");
 #endif
