@@ -258,6 +258,7 @@ macro(add_custom_libcxx name prefix)
     LOG_CONFIGURE 1
     LOG_INSTALL 1
     )
+  set_target_properties(${name} PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
   ExternalProject_Add_Step(${name} force-reconfigure
     DEPENDERS configure

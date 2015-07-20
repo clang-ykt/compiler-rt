@@ -4831,15 +4831,14 @@ INTERCEPTOR(int, fflush, __sanitizer_FILE *fp) {
 INTERCEPTOR(int, fclose, __sanitizer_FILE *fp) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, fclose, fp);
-  if (fp) {
-    COMMON_INTERCEPTOR_FILE_CLOSE(ctx, fp);
-    const FileMetadata *m = GetInterceptorMetadata(fp);
-    if (m) {
-      COMMON_INTERCEPTOR_INITIALIZE_RANGE(*m->addr, *m->size);
-      DeleteInterceptorMetadata(fp);
-    }
+  COMMON_INTERCEPTOR_FILE_CLOSE(ctx, fp);
+  const FileMetadata *m = GetInterceptorMetadata(fp);
+  int res = REAL(fclose)(fp);
+  if (m) {
+    COMMON_INTERCEPTOR_INITIALIZE_RANGE(*m->addr, *m->size);
+    DeleteInterceptorMetadata(fp);
   }
-  return REAL(fclose)(fp);
+  return res;
 }
 #define INIT_FCLOSE COMMON_INTERCEPT_FUNCTION(fclose);
 #else
@@ -4965,29 +4964,31 @@ struct WrappedCookie {
 static uptr wrapped_read(void *cookie, char *buf, uptr size) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(3);
   WrappedCookie *wrapped_cookie = (WrappedCookie *)cookie;
-  return wrapped_cookie->real_io_funcs.read(wrapped_cookie->real_cookie, buf,
-                                            size);
+  __sanitizer_cookie_io_read real_read = wrapped_cookie->real_io_funcs.read;
+  return real_read ? real_read(wrapped_cookie->real_cookie, buf, size) : 0;
 }
 
 static uptr wrapped_write(void *cookie, const char *buf, uptr size) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(3);
   WrappedCookie *wrapped_cookie = (WrappedCookie *)cookie;
-  return wrapped_cookie->real_io_funcs.write(wrapped_cookie->real_cookie, buf,
-                                             size);
+  __sanitizer_cookie_io_write real_write = wrapped_cookie->real_io_funcs.write;
+  return real_write ? real_write(wrapped_cookie->real_cookie, buf, size) : size;
 }
 
 static int wrapped_seek(void *cookie, u64 *offset, int whence) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(3);
   COMMON_INTERCEPTOR_INITIALIZE_RANGE(offset, sizeof(*offset));
   WrappedCookie *wrapped_cookie = (WrappedCookie *)cookie;
-  return wrapped_cookie->real_io_funcs.seek(wrapped_cookie->real_cookie, offset,
-                                            whence);
+  __sanitizer_cookie_io_seek real_seek = wrapped_cookie->real_io_funcs.seek;
+  return real_seek ? real_seek(wrapped_cookie->real_cookie, offset, whence)
+                   : -1;
 }
 
 static int wrapped_close(void *cookie) {
   COMMON_INTERCEPTOR_UNPOISON_PARAM(1);
   WrappedCookie *wrapped_cookie = (WrappedCookie *)cookie;
-  int res = wrapped_cookie->real_io_funcs.close(wrapped_cookie->real_cookie);
+  __sanitizer_cookie_io_close real_close = wrapped_cookie->real_io_funcs.close;
+  int res = real_close ? real_close(wrapped_cookie->real_cookie) : 0;
   InternalFree(wrapped_cookie);
   return res;
 }
