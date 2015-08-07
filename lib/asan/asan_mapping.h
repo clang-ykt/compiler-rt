@@ -73,6 +73,13 @@
 // || `[0x2000000000, 0x23ffffffff]` || LowShadow  ||
 // || `[0x0000000000, 0x1fffffffff]` || LowMem     ||
 //
+// Default Linux/AArch64 (39-bit VMA) mapping:
+// || `[0x2000000000, 0x7fffffffff]` || highmem    ||
+// || `[0x1400000000, 0x1fffffffff]` || highshadow ||
+// || `[0x1200000000, 0x13ffffffff]` || shadowgap  ||
+// || `[0x1000000000, 0x11ffffffff]` || lowshadow  ||
+// || `[0x0000000000, 0x0fffffffff]` || lowmem     ||
+//
 // Shadow mapping on FreeBSD/x86-64 with SHADOW_OFFSET == 0x400000000000:
 // || `[0x500000000000, 0x7fffffffffff]` || HighMem    ||
 // || `[0x4a0000000000, 0x4fffffffffff]` || HighShadow ||
@@ -171,7 +178,8 @@ static const u64 kWindowsShadowOffset32 = 3ULL << 28;  // 0x30000000
 
 // With the zero shadow base we can not actually map pages starting from 0.
 // This constant is somewhat arbitrary.
-#define kZeroBaseShadowStart (1 << 18)
+#define kZeroBaseShadowStart 0
+#define kZeroBaseMaxShadowStart (1 << 18)
 
 #define kShadowGapBeg   (kLowShadowEnd ? kLowShadowEnd + 1 \
                                        : kZeroBaseShadowStart)
