@@ -22,7 +22,7 @@ endif()
 if (NOT MSVC)
   cmake_minimum_required(VERSION 2.8.8)
 else()
-  # Version 2.8.12.1 is required to build with Visual Studion 2013.
+  # Version 2.8.12.1 is required to build with Visual Studio 2013.
   cmake_minimum_required(VERSION 2.8.12.1)
 endif()
 
@@ -354,6 +354,14 @@ if(EXISTS ${COMPILER_RT_LIBCXX_PATH}/)
 else()
   set(COMPILER_RT_HAS_LIBCXX_SOURCES FALSE)
 endif()
+
+set(COMPILER_RT_LLD_PATH ${LLVM_MAIN_SRC_DIR}/tools/lld)
+if(EXISTS ${COMPILER_RT_LLD_PATH}/)
+  set(COMPILER_RT_HAS_LLD_SOURCES TRUE)
+else()
+  set(COMPILER_RT_HAS_LLD_SOURCES FALSE)
+endif()
+pythonize_bool(COMPILER_RT_HAS_LLD_SOURCES)
 
 add_subdirectory(lib)
 
