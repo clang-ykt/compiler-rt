@@ -189,9 +189,15 @@ set(i686_SOURCES
 set(arm_SOURCES
   arm/adddf3vfp.S
   arm/addsf3vfp.S
+  arm/aeabi_cdcmp.S
+  arm/aeabi_cdcmpeq_check_nan.c
+  arm/aeabi_cfcmp.S
+  arm/aeabi_cfcmpeq_check_nan.c
   arm/aeabi_dcmp.S
   arm/aeabi_div0.c
+  arm/aeabi_drsub.c
   arm/aeabi_fcmp.S
+  arm/aeabi_frsub.c
   arm/aeabi_idivmod.S
   arm/aeabi_ldivmod.S
   arm/aeabi_memcmp.S

@@ -261,7 +261,11 @@ macro(add_asan_tests_for_arch_and_kind arch kind)
 endmacro()
 
 if(COMPILER_RT_CAN_EXECUTE_TESTS AND NOT ANDROID)
-  foreach(arch ${ASAN_SUPPORTED_ARCH})
+  set(ASAN_TEST_ARCH ${ASAN_SUPPORTED_ARCH})
+  if(APPLE)
+    darwin_filter_host_archs(ASAN_SUPPORTED_ARCH ASAN_TEST_ARCH)
+  endif()
+  foreach(arch ${ASAN_TEST_ARCH})
     add_asan_tests_for_arch_and_kind(${arch} "-inline")
     add_asan_tests_for_arch_and_kind(${arch} "-with-calls"
       -mllvm -asan-instrumentation-with-call-threshold=0)
