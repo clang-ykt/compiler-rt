@@ -43,6 +43,11 @@ endif()
 # Top level target used to build all compiler-rt libraries.
 add_custom_target(compiler-rt ALL)
 
+option(COMPILER_RT_BUILD_BUILTINS "Build builtins" ON)
+mark_as_advanced(COMPILER_RT_BUILD_BUILTINS)
+option(COMPILER_RT_BUILD_SANITIZERS "Build sanitizers" ON)
+mark_as_advanced(COMPILER_RT_BUILD_SANITIZERS)
+
 if (NOT COMPILER_RT_STANDALONE_BUILD)
   # Compute the Clang version from the LLVM version.
   # FIXME: We should be able to reuse CLANG_VERSION variable calculated
@@ -311,5 +316,5 @@ add_subdirectory(lib)
 
 if(COMPILER_RT_INCLUDE_TESTS)
   add_subdirectory(unittests)
+  add_subdirectory(test)
 endif()
-add_subdirectory(test)
