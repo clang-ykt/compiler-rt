@@ -207,7 +207,8 @@ elseif(NOT APPLE) # Supported archs for Apple platforms are generated later
     test_target_arch(mips "" "-mips32r2" "--target=mips-linux-gnu")
     test_target_arch(mips64 "" "-mips64r2" "-mabi=n64")
   elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "arm")
-    test_target_arch(arm "" "-march=armv7-a")
+    test_target_arch(arm "" "-march=armv7-a" "-mfloat-abi=soft")
+    test_target_arch(armhf "" "-march=armv7-a" "-mfloat-abi=hard")
   elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "aarch32")
     test_target_arch(aarch32 "" "-march=armv8-a")
   elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "aarch64")
@@ -246,42 +247,48 @@ function(get_target_flags_for_arch arch out_var)
 endfunction()
 
 set(ARM64 aarch64)
-set(ARM32 arm)
+set(ARM32 arm armhf)
+set(X86 i386 i686)
 set(X86_64 x86_64)
+set(MIPS32 mips mipsel)
+set(MIPS64 mips64 mips64el)
+set(PPC64 powerpc64 powerpc64le)
+
 if(APPLE)
   set(ARM64 arm64)
   set(ARM32 armv7 armv7s)
   set(X86_64 x86_64 x86_64h)
 endif()
 
-set(ALL_BUILTIN_SUPPORTED_ARCH i386 i686 ${X86_64} ${ARM32} ${ARM64})
-set(ALL_SANITIZER_COMMON_SUPPORTED_ARCH ${X86_64} i386 i686 powerpc64
-  powerpc64le ${ARM32} ${ARM64} mips mips64 mipsel mips64el)
-set(ALL_ASAN_SUPPORTED_ARCH ${X86_64} i386 i686 powerpc64 powerpc64le ${ARM32}
-  ${ARM64} mips mipsel mips64 mips64el)
-set(ALL_DFSAN_SUPPORTED_ARCH ${X86_64} mips64 mips64el ${ARM64})
-set(ALL_LSAN_SUPPORTED_ARCH ${X86_64} mips64 mips64el)
-set(ALL_MSAN_SUPPORTED_ARCH ${X86_64} mips64 mips64el ${ARM64})
-set(ALL_PROFILE_SUPPORTED_ARCH ${X86_64} i386 i686 ${ARM32} mips mips64
-    mipsel mips64el ${ARM64} powerpc64 powerpc64le)
-set(ALL_TSAN_SUPPORTED_ARCH ${X86_64} mips64 mips64el ${ARM64})
-set(ALL_UBSAN_SUPPORTED_ARCH ${X86_64} i386 i686 ${ARM32} ${ARM64} mips
-    mipsel mips64 mips64el powerpc64 powerpc64le)
-set(ALL_SAFESTACK_SUPPORTED_ARCH ${X86_64} i386 i686)
+set(ALL_BUILTIN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64})
+set(ALL_SANITIZER_COMMON_SUPPORTED_ARCH ${X86} ${X86_64} ${PPC64}
+    ${ARM32} ${ARM64} ${MIPS32} ${MIPS64})
+set(ALL_ASAN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64}
+    ${MIPS32} ${MIPS64} ${PPC64})
+set(ALL_DFSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64})
+set(ALL_LSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64})
+set(ALL_MSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64})
+set(ALL_PROFILE_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64} ${PPC64}
+    ${MIPS32} ${MIPS64})
+set(ALL_TSAN_SUPPORTED_ARCH ${X86_64} ${MIPS64} ${ARM64})
+set(ALL_UBSAN_SUPPORTED_ARCH ${X86} ${X86_64} ${ARM32} ${ARM64}
+    ${MIPS32} ${MIPS64} ${PPC64})
+set(ALL_SAFESTACK_SUPPORTED_ARCH ${X86} ${X86_64})
 
 if(APPLE)
   include(CompilerRTDarwinUtils)
 
   option(COMPILER_RT_ENABLE_IOS "Enable building for iOS - Experimental" Off)
 
-  find_darwin_sdk_dir(OSX_SDK_DIR macosx)
-  find_darwin_sdk_dir(IOSSIM_SDK_DIR iphonesimulator)
-  find_darwin_sdk_dir(IOS_SDK_DIR iphoneos)
+  find_darwin_sdk_dir(DARWIN_osx_SYSROOT macosx)
+  find_darwin_sdk_dir(DARWIN_iossim_SYSROOT iphonesimulator)
+  find_darwin_sdk_dir(DARWIN_ios_SYSROOT iphoneos)
 
   # Note: In order to target x86_64h on OS X the minimum deployment target must
   # be 10.8 or higher.
   set(SANITIZER_COMMON_SUPPORTED_OS osx)
   set(BUILTIN_SUPPORTED_OS osx)
+  set(PROFILE_SUPPORTED_OS osx)
   if(NOT SANITIZER_MIN_OSX_VERSION)
     string(REGEX MATCH "-mmacosx-version-min=([.0-9]+)"
            MACOSX_VERSION_MIN_FLAG "${CMAKE_CXX_FLAGS}")
@@ -312,10 +319,13 @@ if(APPLE)
   set(DARWIN_osx_LINKFLAGS
     ${DARWIN_COMMON_LINKFLAGS}
     -mmacosx-version-min=${SANITIZER_MIN_OSX_VERSION})
+  set(DARWIN_osx_BUILTIN_MIN_VER 10.5)
+  set(DARWIN_osx_BUILTIN_MIN_VER_FLAG
+      -mmacosx-version-min=${DARWIN_osx_BUILTIN_MIN_VER})
 
-  if(OSX_SDK_DIR)
-    list(APPEND DARWIN_osx_CFLAGS -isysroot ${OSX_SDK_DIR})
-    list(APPEND DARWIN_osx_LINKFLAGS -isysroot ${OSX_SDK_DIR})
+  if(DARWIN_osx_SYSROOT)
+    list(APPEND DARWIN_osx_CFLAGS -isysroot ${DARWIN_osx_SYSROOT})
+    list(APPEND DARWIN_osx_LINKFLAGS -isysroot ${DARWIN_osx_SYSROOT})
   endif()
 
   # Figure out which arches to use for each OS
@@ -332,18 +342,33 @@ if(APPLE)
       set(CAN_TARGET_${arch} 1)
     endforeach()
 
-    if(IOSSIM_SDK_DIR)
+    # Need to build a 10.4 compatible libclang_rt
+    set(DARWIN_10.4_SYSROOT ${DARWIN_osx_SYSROOT})
+    set(DARWIN_10.4_BUILTIN_MIN_VER 10.4)
+    set(DARWIN_10.4_BUILTIN_MIN_VER_FLAG
+        -mmacosx-version-min=${DARWIN_10.4_BUILTIN_MIN_VER})
+    set(DARWIN_10.4_SKIP_CC_KEXT On)
+    list(APPEND BUILTIN_SUPPORTED_OS 10.4)
+    darwin_test_archs(10.4
+      DARWIN_10.4_ARCHS
+      ${toolchain_arches})
+
+    if(DARWIN_iossim_SYSROOT)
       set(DARWIN_iossim_CFLAGS
         ${DARWIN_COMMON_CFLAGS}
         -mios-simulator-version-min=7.0
-        -isysroot ${IOSSIM_SDK_DIR})
+        -isysroot ${DARWIN_iossim_SYSROOT})
       set(DARWIN_iossim_LINKFLAGS
         ${DARWIN_COMMON_LINKFLAGS}
         -mios-simulator-version-min=7.0
-        -isysroot ${IOSSIM_SDK_DIR})
+        -isysroot ${DARWIN_iossim_SYSROOT})
+      set(DARWIN_iossim_BUILTIN_MIN_VER 6.0)
+      set(DARWIN_iossim_BUILTIN_MIN_VER_FLAG
+        -mios-simulator-version-min=${DARWIN_iossim_BUILTIN_MIN_VER})
 
       list(APPEND SANITIZER_COMMON_SUPPORTED_OS iossim)
       list(APPEND BUILTIN_SUPPORTED_OS iossim)
+      set(DARWIN_iossim_SKIP_CC_KEXT On)
       darwin_test_archs(iossim
         DARWIN_iossim_ARCHS
         ${toolchain_arches})
@@ -354,18 +379,22 @@ if(APPLE)
       endforeach()
     endif()
 
-    if(IOS_SDK_DIR AND COMPILER_RT_ENABLE_IOS)
+    if(DARWIN_ios_SYSROOT AND COMPILER_RT_ENABLE_IOS)
       set(DARWIN_ios_CFLAGS
         ${DARWIN_COMMON_CFLAGS}
         -miphoneos-version-min=7.0
-        -isysroot ${IOS_SDK_DIR})
+        -isysroot ${DARWIN_ios_SYSROOT})
       set(DARWIN_ios_LINKFLAGS
         ${DARWIN_COMMON_LINKFLAGS}
         -miphoneos-version-min=7.0
-        -isysroot ${IOS_SDK_DIR})
+        -isysroot ${DARWIN_ios_SYSROOT})
+      set(DARWIN_ios_BUILTIN_MIN_VER 6.0)
+      set(DARWIN_ios_BUILTIN_MIN_VER_FLAG
+        -miphoneos-version-min=${DARWIN_ios_BUILTIN_MIN_VER})
 
       list(APPEND SANITIZER_COMMON_SUPPORTED_OS ios)
       list(APPEND BUILTIN_SUPPORTED_OS ios)
+      list(APPEND PROFILE_SUPPORTED_OS ios)
       darwin_test_archs(ios
         DARWIN_ios_ARCHS
         ${toolchain_arches})
@@ -400,10 +429,9 @@ if(APPLE)
   list_union(MSAN_SUPPORTED_ARCH
     ALL_MSAN_SUPPORTED_ARCH
     SANITIZER_COMMON_SUPPORTED_ARCH)
-  # Note: profiles is only built for OS X
   list_union(PROFILE_SUPPORTED_ARCH
     ALL_PROFILE_SUPPORTED_ARCH
-    DARWIN_osx_ARCHS)
+    SANITIZER_COMMON_SUPPORTED_ARCH)
   list_union(TSAN_SUPPORTED_ARCH
     ALL_TSAN_SUPPORTED_ARCH
     SANITIZER_COMMON_SUPPORTED_ARCH)

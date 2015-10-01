@@ -139,6 +139,17 @@ set(GENERIC_SOURCES
   umodsi3.c
   umodti3.c)
 
+if(APPLE)
+  set(GENERIC_SOURCES
+    ${GENERIC_SOURCES}
+    atomic_flag_clear.c
+    atomic_flag_clear_explicit.c
+    atomic_flag_test_and_set.c
+    atomic_flag_test_and_set_explicit.c
+    atomic_signal_fence.c
+    atomic_thread_fence.c)
+endif()
+
 if(NOT WIN32)
   set(GENERIC_SOURCES
       ${GENERIC_SOURCES}
@@ -302,52 +313,22 @@ set(aarch64_SOURCES
   trunctfsf2.c
   ${GENERIC_SOURCES})
 
+set(armhf_SOURCES ${arm_SOURCES})
 set(armv7_SOURCES ${arm_SOURCES})
 set(armv7s_SOURCES ${arm_SOURCES})
 set(arm64_SOURCES ${aarch64_SOURCES})
 
+# macho_embedded archs
+set(armv6m_SOURCES ${GENERIC_SOURCES})
+set(armv7m_SOURCES ${arm_SOURCES})
+set(armv7em_SOURCES ${arm_SOURCES})
+
 add_custom_target(builtins)
 
 if (APPLE)
-  foreach (os ${BUILTIN_SUPPORTED_OS})
-    list_union(DARWIN_BUILTIN_ARCHS DARWIN_${os}_ARCHS BUILTIN_SUPPORTED_ARCH)
-    set(${os}_builtin_libs)
-    set(${os}_builtin_lipo_flags)
-    foreach (arch ${DARWIN_BUILTIN_ARCHS})
-      # Filter out generic versions of routines that are re-implemented in
-      # architecture specific manner.  This prevents multiple definitions of the
-      # same symbols, making the symbol selection non-deterministic.
-      foreach (_file ${${arch}_SOURCES})
-        if (${_file} MATCHES ${arch}/*)
-          get_filename_component(_name ${_file} NAME)
-          string(REPLACE ".S" ".c" _cname "${_name}")
-          list(REMOVE_ITEM ${arch}_SOURCES ${_cname})
-        endif ()
-      endforeach ()
-
-      add_compiler_rt_runtime(clang_rt.builtins_${arch} STATIC
-                              OS ${os}
-                              ARCHS ${arch}
-                              SOURCES ${${arch}_SOURCES}
-                              CFLAGS "-std=c99" ${DARWIN_${os}_CFLAGS} -arch ${arch}
-                              PARENT_TARGET builtins)
-      list(APPEND ${os}_builtin_libs clang_rt.builtins_${arch}_${os})
-      list(APPEND ${os}_builtin_lipo_flags -arch ${arch} 
-        ${COMPILER_RT_LIBRARY_OUTPUT_DIR}/libclang_rt.builtins_${arch}_${os}.a)
-    endforeach()
-
-    if(${os}_builtin_libs)
-      add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/libclang_rt.builtins_${os}.a
-        COMMAND lipo -output
-                ${COMPILER_RT_LIBRARY_OUTPUT_DIR}/libclang_rt.builtins_${os}.a
-                -create ${${os}_builtin_lipo_flags}
-        DEPENDS ${${os}_builtin_libs}
-        )
-      add_custom_target(clang_rt.builtins_${os}
-        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libclang_rt.builtins_${os}.a)
-      add_dependencies(builtins clang_rt.builtins_${os})
-    endif()
-  endforeach()
+  add_subdirectory(Darwin-excludes)
+  add_subdirectory(macho_embedded)
+  darwin_add_builtin_libraries(${BUILTIN_SUPPORTED_OS})
 elseif (NOT WIN32 OR MINGW)
   foreach (arch ${BUILTIN_SUPPORTED_ARCH})
     if (CAN_TARGET_${arch})
