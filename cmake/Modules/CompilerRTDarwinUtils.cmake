@@ -349,6 +349,7 @@ function(darwin_add_embedded_builtin_libraries)
 
   darwin_read_list_from_file(common_FUNCTIONS ${MACHO_SYM_DIR}/common.txt)
   darwin_read_list_from_file(thumb2_FUNCTIONS ${MACHO_SYM_DIR}/thumb2.txt)
+  darwin_read_list_from_file(thumb2_64_FUNCTIONS ${MACHO_SYM_DIR}/thumb2-64.txt)
   darwin_read_list_from_file(arm_FUNCTIONS ${MACHO_SYM_DIR}/arm.txt)
   darwin_read_list_from_file(i386_FUNCTIONS ${MACHO_SYM_DIR}/i386.txt)
 
@@ -356,7 +357,7 @@ function(darwin_add_embedded_builtin_libraries)
   set(armv6m_FUNCTIONS ${common_FUNCTIONS} ${arm_FUNCTIONS})
   set(armv7m_FUNCTIONS ${common_FUNCTIONS} ${arm_FUNCTIONS} ${thumb2_FUNCTIONS})
   set(armv7em_FUNCTIONS ${common_FUNCTIONS} ${arm_FUNCTIONS} ${thumb2_FUNCTIONS})
-  set(armv7_FUNCTIONS ${common_FUNCTIONS} ${arm_FUNCTIONS} ${thumb2_FUNCTIONS})
+  set(armv7_FUNCTIONS ${common_FUNCTIONS} ${arm_FUNCTIONS} ${thumb2_FUNCTIONS} ${thumb2_64_FUNCTIONS})
   set(i386_FUNCTIONS ${common_FUNCTIONS} ${i386_FUNCTIONS})
   set(x86_64_FUNCTIONS ${common_FUNCTIONS})
 
@@ -377,14 +378,18 @@ function(darwin_add_embedded_builtin_libraries)
       foreach(arch ${DARWIN_${float_type}_FLOAT_ARCHS})
         set(DARWIN_macho_embedded_SYSROOT ${DARWIN_osx_SYSROOT})
         set(DARWIN_macho_embedded_BUILTIN_MIN_VER_FLAG ${DARWIN_osx_BUILTIN_MIN_VER_FLAG})
+        set(float_flag)
         if(${arch} MATCHES "^arm")
           set(DARWIN_macho_embedded_SYSROOT ${DARWIN_ios_SYSROOT})
+          # x86 targets are hard float by default, but the complain about the
+          # float ABI flag, so don't pass it unless we're targeting arm.
+          set(float_flag ${${float_type}_FLOAT_FLAG})
         endif()
         darwin_add_builtin_library(clang_rt ${lib_suffix}
                               OS macho_embedded
                               ARCH ${arch}
                               SOURCES ${${arch}_filtered_sources}
-                              CFLAGS -arch ${arch} ${${type}_FLAG} ${${float_type}_FLOAT_FLAG} ${CFLAGS_${arch}}
+                              CFLAGS -arch ${arch} ${${type}_FLAG} ${float_flag} ${CFLAGS_${arch}}
                               PARENT_TARGET builtins)
       endforeach()
       foreach(lib ${macho_embedded_${lib_suffix}_libs})
