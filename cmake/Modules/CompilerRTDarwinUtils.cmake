@@ -183,10 +183,11 @@ endmacro()
 function(darwin_lipo_libs name)
   cmake_parse_arguments(LIB
     ""
-    "PARENT_TARGET;OUTPUT_DIR"
+    "PARENT_TARGET;OUTPUT_DIR;INSTALL_DIR"
     "LIPO_FLAGS;DEPENDS"
     ${ARGN})
   add_custom_command(OUTPUT ${LIB_OUTPUT_DIR}/lib${name}.a
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${LIB_OUTPUT_DIR}
     COMMAND lipo -output
             ${LIB_OUTPUT_DIR}/lib${name}.a
             -create ${LIB_LIPO_FLAGS}
@@ -196,7 +197,7 @@ function(darwin_lipo_libs name)
     DEPENDS ${LIB_OUTPUT_DIR}/lib${name}.a)
   add_dependencies(${LIB_PARENT_TARGET} ${name})
   install(FILES ${LIB_OUTPUT_DIR}/lib${name}.a
-    DESTINATION ${COMPILER_RT_INSTALL_PATH})
+    DESTINATION ${LIB_INSTALL_DIR})
 endfunction()
 
 # Filter out generic versions of routines that are re-implemented in
@@ -296,7 +297,8 @@ macro(darwin_add_builtin_libraries)
                       PARENT_TARGET builtins
                       LIPO_FLAGS ${${os}_cc_kext_lipo_flags}
                       DEPENDS ${${os}_cc_kext_libs}
-                      OUTPUT_DIR ${COMPILER_RT_LIBRARY_OUTPUT_DIR})
+                      OUTPUT_DIR ${COMPILER_RT_LIBRARY_OUTPUT_DIR}
+                      INSTALL_DIR ${COMPILER_RT_LIBRARY_INSTALL_DIR})
     endif()
   endforeach()
 
@@ -307,7 +309,8 @@ macro(darwin_add_builtin_libraries)
                         PARENT_TARGET builtins
                         LIPO_FLAGS ${${os}_builtins_lipo_flags} ${${os}sim_builtins_lipo_flags}
                         DEPENDS ${${os}_builtins_libs} ${${os}sim_builtins_libs}
-                        OUTPUT_DIR ${COMPILER_RT_LIBRARY_OUTPUT_DIR})
+                        OUTPUT_DIR ${COMPILER_RT_LIBRARY_OUTPUT_DIR}
+                        INSTALL_DIR ${COMPILER_RT_LIBRARY_INSTALL_DIR})
     endif()
   endforeach()
   darwin_add_embedded_builtin_libraries()
@@ -338,6 +341,8 @@ function(darwin_add_embedded_builtin_libraries)
 
   set(DARWIN_macho_embedded_LIBRARY_OUTPUT_DIR
     ${COMPILER_RT_OUTPUT_DIR}/lib/macho_embedded)
+  set(DARWIN_macho_embedded_LIBRARY_INSTALL_DIR
+    ${COMPILER_RT_INSTALL_PATH}/lib/macho_embedded)
     
   set(CFLAGS_armv7 "-target thumbv7-apple-darwin-eabi")
   set(CFLAGS_armv7em "-target thumbv7-apple-darwin-eabi")
@@ -399,7 +404,8 @@ function(darwin_add_embedded_builtin_libraries)
                     PARENT_TARGET builtins
                     LIPO_FLAGS ${macho_embedded_${lib_suffix}_lipo_flags}
                     DEPENDS ${macho_embedded_${lib_suffix}_libs}
-                    OUTPUT_DIR ${DARWIN_macho_embedded_LIBRARY_OUTPUT_DIR})
+                    OUTPUT_DIR ${DARWIN_macho_embedded_LIBRARY_OUTPUT_DIR}
+                    INSTALL_DIR ${DARWIN_macho_embedded_LIBRARY_INSTALL_DIR})
     endforeach()
   endforeach()
 endfunction()
