@@ -16,12 +16,9 @@ typedef ssize_t (*process_vm_readwritev_fn)(pid_t, const iovec *, unsigned long,
 
 int main(void) {
   // This requires glibc 2.15.
-  process_vm_readwritev_fn process_vm_readv =
-      (process_vm_readwritev_fn)dlsym(RTLD_DEFAULT, "process_vm_readv");
-  process_vm_readwritev_fn process_vm_writev =
-      (process_vm_readwritev_fn)dlsym(RTLD_DEFAULT, "process_vm_writev");
-  if (!process_vm_readv) {
-    assert(!process_vm_writev);
+  process_vm_readwritev_fn libc_process_vm_readv =
+      (process_vm_readwritev_fn)dlsym(RTLD_NEXT, "process_vm_readv");
+  if (!libc_process_vm_readv) {
 // Exit with success, emulating the expected output.
 #ifdef POSITIVE
     printf("process_vm_readv not found!\n");
@@ -32,7 +29,11 @@ int main(void) {
     return 0;
 #endif
   }
-  assert(process_vm_readv && process_vm_writev);
+
+  process_vm_readwritev_fn process_vm_readv =
+      (process_vm_readwritev_fn)dlsym(RTLD_DEFAULT, "process_vm_readv");
+  process_vm_readwritev_fn process_vm_writev =
+      (process_vm_readwritev_fn)dlsym(RTLD_DEFAULT, "process_vm_writev");
 
   char a[100];
   memset(a, 0xab, 100);
