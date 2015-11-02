@@ -47,6 +47,7 @@ void SetSandboxingCallback(void (*f)()) {
 }
 
 void ReportErrorSummary(const char *error_type, StackTrace *stack) {
+#if !SANITIZER_GO
   if (!common_flags()->print_summary)
     return;
   if (stack->size == 0) {
@@ -59,6 +60,7 @@ void ReportErrorSummary(const char *error_type, StackTrace *stack) {
   SymbolizedStack *frame = Symbolizer::GetOrInit()->SymbolizePC(pc);
   ReportErrorSummary(error_type, frame->info);
   frame->ClearAll();
+#endif
 }
 
 static void (*SoftRssLimitExceededCallback)(bool exceeded);
@@ -139,7 +141,8 @@ void WriteToSyslog(const char *buffer) {
 }
 
 void MaybeStartBackgroudThread() {
-#if SANITIZER_LINUX  // Need to implement/test on other platforms.
+#if SANITIZER_LINUX && \
+    !SANITIZER_GO  // Need to implement/test on other platforms.
   // Start the background thread if one of the rss limits is given.
   if (!common_flags()->hard_rss_limit_mb &&
       !common_flags()->soft_rss_limit_mb) return;
