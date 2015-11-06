@@ -62,20 +62,6 @@
 
 namespace __sanitizer {
 
-// This function is defined elsewhere if we intercepted pthread_attr_getstack.
-extern "C" {
-SANITIZER_WEAK_ATTRIBUTE int
-real_pthread_attr_getstack(void *attr, void **addr, size_t *size);
-} // extern "C"
-
-static int my_pthread_attr_getstack(void *attr, void **addr, size_t *size) {
-#if !SANITIZER_GO
-  if (&real_pthread_attr_getstack)
-    return real_pthread_attr_getstack((pthread_attr_t *)attr, addr, size);
-#endif
-  return pthread_attr_getstack((pthread_attr_t *)attr, addr, size);
-}
-
 SANITIZER_WEAK_ATTRIBUTE int
 real_sigaction(int signum, const void *act, void *oldact);
 
@@ -128,7 +114,7 @@ void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
   CHECK_EQ(pthread_getattr_np(pthread_self(), &attr), 0);
   uptr stacksize = 0;
   void *stackaddr = nullptr;
-  my_pthread_attr_getstack(&attr, &stackaddr, (size_t*)&stacksize);
+  my_pthread_attr_getstack(&attr, &stackaddr, &stacksize);
   pthread_attr_destroy(&attr);
 
   CHECK_LE(stacksize, kMaxThreadStackSize);  // Sanity check.
@@ -400,33 +386,6 @@ void GetThreadStackAndTls(bool main, uptr *stk_addr, uptr *stk_size,
 #endif
 }
 
-#if !SANITIZER_GO
-void AdjustStackSize(void *attr_) {
-  pthread_attr_t *attr = (pthread_attr_t *)attr_;
-  uptr stackaddr = 0;
-  size_t stacksize = 0;
-  my_pthread_attr_getstack(attr, (void**)&stackaddr, &stacksize);
-  // GLibC will return (0 - stacksize) as the stack address in the case when
-  // stacksize is set, but stackaddr is not.
-  bool stack_set = (stackaddr != 0) && (stackaddr + stacksize != 0);
-  // We place a lot of tool data into TLS, account for that.
-  const uptr minstacksize = GetTlsSize() + 128*1024;
-  if (stacksize < minstacksize) {
-    if (!stack_set) {
-      if (stacksize != 0) {
-        VPrintf(1, "Sanitizer: increasing stacksize %zu->%zu\n", stacksize,
-                minstacksize);
-        pthread_attr_setstacksize(attr, minstacksize);
-      }
-    } else {
-      Printf("Sanitizer: pre-allocated stack size is insufficient: "
-             "%zu < %zu\n", stacksize, minstacksize);
-      Printf("Sanitizer: pthread_create is likely to fail.\n");
-    }
-  }
-}
-#endif // !SANITIZER_GO
-
 # if !SANITIZER_FREEBSD
 typedef ElfW(Phdr) Elf_Phdr;
 # elif SANITIZER_WORDSIZE == 32 && __FreeBSD_version <= 902001  // v9.2
@@ -548,16 +507,16 @@ void AndroidLogInit() {
   atomic_store(&android_log_initialized, 1, memory_order_release);
 }
 
-bool ShouldLogAfterPrintf() {
+static bool IsSyslogAvailable() {
   return atomic_load(&android_log_initialized, memory_order_acquire);
 }
 #else
 void AndroidLogInit() {}
 
-bool ShouldLogAfterPrintf() { return true; }
+static bool IsSyslogAvailable() { return true; }
 #endif  // SANITIZER_ANDROID
 
-void WriteOneLineToSyslog(const char *s) {
+static void WriteOneLineToSyslog(const char *s) {
 #if SANITIZER_ANDROID &&__ANDROID_API__ < 21
   __android_log_write(ANDROID_LOG_INFO, NULL, s);
 #else
@@ -565,6 +524,24 @@ void WriteOneLineToSyslog(const char *s) {
 #endif
 }
 
+void WriteToSyslog(const char *buffer) {
+  if (!IsSyslogAvailable())
+    return;
+  char *copy = internal_strdup(buffer);
+  char *p = copy;
+  char *q;
+  // syslog, at least on Android, has an implicit message length limit.
+  // Print one line at a time.
+  do {
+    q = internal_strchr(p, '\n');
+    if (q)
+      *q = '\0';
+    WriteOneLineToSyslog(p);
+    if (q)
+      p = q + 1;
+  } while (q);
+  InternalFree(copy);
+}
 #endif // SANITIZER_LINUX
 
 } // namespace __sanitizer
