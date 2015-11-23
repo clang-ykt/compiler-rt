@@ -47,6 +47,7 @@ set(TSAN_CXX_SOURCES
 
 if(APPLE)
   list(APPEND TSAN_SOURCES
+    rtl/tsan_libdispatch_mac.cc
     rtl/tsan_platform_mac.cc
     rtl/tsan_platform_posix.cc)
 elseif(UNIX)
@@ -87,6 +88,12 @@ set(TSAN_HEADERS
 set(TSAN_RUNTIME_LIBRARIES)
 add_custom_target(tsan)
 
+add_compiler_rt_object_libraries(RTTsan_dynamic 
+  OS ${TSAN_SUPPORTED_OS}
+  ARCHS ${TSAN_SUPPORTED_ARCH}
+  SOURCES ${TSAN_SOURCES} ${TSAN_CXX_SOURCES}
+  CFLAGS ${TSAN_RTL_CFLAGS})
+
 if(APPLE)
   add_compiler_rt_runtime(clang_rt.tsan
     SHARED
@@ -115,6 +122,11 @@ else()
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/go
         COMMENT "Checking TSan Go runtime..."
         VERBATIM)
+    elseif(arch STREQUAL "aarch64")
+      set(TSAN_ASM_SOURCES rtl/tsan_rtl_aarch64.S)
+      # Pass ASM file directly to the C++ compiler.
+      set_source_files_properties(${TSAN_ASM_SOURCES} PROPERTIES
+        LANGUAGE C)
     else()
       set(TSAN_ASM_SOURCES)
     endif()

@@ -13,6 +13,7 @@
 
 #include "sanitizer_platform.h"
 #if SANITIZER_MAC
+#include "sanitizer_mac.h"
 
 // Use 64-bit inodes in file operations. ASan does not support OS X 10.5, so
 // the clients will most certainly use 64-bit ones as well.
@@ -25,7 +26,6 @@
 #include "sanitizer_flags.h"
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_libc.h"
-#include "sanitizer_mac.h"
 #include "sanitizer_placement_new.h"
 #include "sanitizer_platform_limits_posix.h"
 #include "sanitizer_procmaps.h"
@@ -36,6 +36,14 @@
 extern char **environ;
 #endif
 
+#if defined(__has_include) && __has_include(<os/trace.h>)
+#define SANITIZER_OS_TRACE 1
+#include <os/trace.h>
+#else
+#define SANITIZER_OS_TRACE 0
+#endif
+
+#include <asl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libkern/OSAtomic.h>
@@ -52,6 +60,7 @@ extern char **environ;
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <util.h>
 
 namespace __sanitizer {
 
@@ -147,9 +156,30 @@ uptr internal_sigprocmask(int how, __sanitizer_sigset_t *set,
   return sigprocmask(how, set, oldset);
 }
 
+// Doesn't call pthread_atfork() handlers.
+extern "C" pid_t __fork(void);
+
 int internal_fork() {
-  // TODO(glider): this may call user's pthread_atfork() handlers which is bad.
-  return fork();
+  return __fork();
+}
+
+int internal_forkpty(int *amaster) {
+  int master, slave;
+  if (openpty(&master, &slave, nullptr, nullptr, nullptr) == -1) return -1;
+  int pid = __fork();
+  if (pid == -1) {
+    close(master);
+    close(slave);
+    return -1;
+  }
+  if (pid == 0) {
+    close(master);
+    CHECK_EQ(login_tty(slave), 0);
+  } else {
+    *amaster = master;
+    close(slave);
+  }
+  return pid;
 }
 
 uptr internal_rename(const char *oldpath, const char *newpath) {
@@ -371,8 +401,63 @@ uptr GetRSS() {
   return info.resident_size;
 }
 
-void *internal_start_thread(void (*func)(void *arg), void *arg) { return 0; }
-void internal_join_thread(void *th) { }
+void *internal_start_thread(void(*func)(void *arg), void *arg) {
+  // Start the thread with signals blocked, otherwise it can steal user signals.
+  __sanitizer_sigset_t set, old;
+  internal_sigfillset(&set);
+  internal_sigprocmask(SIG_SETMASK, &set, &old);
+  pthread_t th;
+  pthread_create(&th, 0, (void*(*)(void *arg))func, arg);
+  internal_sigprocmask(SIG_SETMASK, &old, 0);
+  return th;
+}
+
+void internal_join_thread(void *th) { pthread_join((pthread_t)th, 0); }
+
+static BlockingMutex syslog_lock(LINKER_INITIALIZED);
+
+void WriteOneLineToSyslog(const char *s) {
+  syslog_lock.CheckLocked();
+  asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "%s", s);
+}
+
+void LogFullErrorReport(const char *buffer) {
+  // Log with os_trace. This will make it into the crash log.
+#if SANITIZER_OS_TRACE
+  if (GetMacosVersion() >= MACOS_VERSION_YOSEMITE) {
+    // os_trace requires the message (format parameter) to be a string literal.
+    if (internal_strncmp(SanitizerToolName, "AddressSanitizer",
+                         sizeof("AddressSanitizer") - 1) == 0)
+      os_trace("Address Sanitizer reported a failure.");
+    else if (internal_strncmp(SanitizerToolName, "UndefinedBehaviorSanitizer",
+                              sizeof("UndefinedBehaviorSanitizer") - 1) == 0)
+      os_trace("Undefined Behavior Sanitizer reported a failure.");
+    else if (internal_strncmp(SanitizerToolName, "ThreadSanitizer",
+                              sizeof("ThreadSanitizer") - 1) == 0)
+      os_trace("Thread Sanitizer reported a failure.");
+    else
+      os_trace("Sanitizer tool reported a failure.");
+
+    if (common_flags()->log_to_syslog)
+      os_trace("Consult syslog for more information.");
+  }
+#endif
+
+  // Log to syslog.
+  // The logging on OS X may call pthread_create so we need the threading
+  // environment to be fully initialized. Also, this should never be called when
+  // holding the thread registry lock since that may result in a deadlock. If
+  // the reporting thread holds the thread registry mutex, and asl_log waits
+  // for GCD to dispatch a new thread, the process will deadlock, because the
+  // pthread_create wrapper needs to acquire the lock as well.
+  BlockingMutexLock l(&syslog_lock);
+  if (common_flags()->log_to_syslog)
+    WriteToSyslog(buffer);
+
+  // Log to CrashLog.
+  if (common_flags()->abort_on_error)
+    CRSetCrashLogMessage(buffer);
+}
 
 void GetPcSpBp(void *context, uptr *pc, uptr *sp, uptr *bp) {
   ucontext_t *ucontext = (ucontext_t*)context;

@@ -28,6 +28,7 @@ check_cxx_compiler_flag(-std=c++11           COMPILER_RT_HAS_STD_CXX11_FLAG)
 check_cxx_compiler_flag(-ftls-model=initial-exec COMPILER_RT_HAS_FTLS_MODEL_INITIAL_EXEC)
 check_cxx_compiler_flag(-fno-lto             COMPILER_RT_HAS_FNO_LTO_FLAG)
 check_cxx_compiler_flag(-msse3               COMPILER_RT_HAS_MSSE3_FLAG)
+check_cxx_compiler_flag(-std=c99             COMPILER_RT_HAS_STD_C99_FLAG)
 
 check_cxx_compiler_flag(/GR COMPILER_RT_HAS_GR_FLAG)
 check_cxx_compiler_flag(/GS COMPILER_RT_HAS_GS_FLAG)
@@ -279,6 +280,17 @@ set(ALL_SAFESTACK_SUPPORTED_ARCH ${X86} ${X86_64})
 if(APPLE)
   include(CompilerRTDarwinUtils)
 
+  # On Darwin if /usr/include doesn't exist, the user probably has Xcode but not
+  # the command line tools. If this is the case, we need to find the OS X
+  # sysroot to pass to clang.
+  if(NOT EXISTS /usr/include)
+    execute_process(COMMAND xcodebuild -version -sdk macosx Path
+       OUTPUT_VARIABLE OSX_SYSROOT
+       ERROR_QUIET
+       OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(OSX_SYSROOT_FLAG "-isysroot${OSX_SYSROOT}")
+  endif()
+
   option(COMPILER_RT_ENABLE_IOS "Enable building for iOS - Experimental" Off)
 
   find_darwin_sdk_dir(DARWIN_osx_SYSROOT macosx)
@@ -409,6 +421,7 @@ if(APPLE)
         list(APPEND BUILTIN_SUPPORTED_OS ios)
         list(APPEND PROFILE_SUPPORTED_OS ios)
         list(APPEND BUILTIN_SUPPORTED_OS iossim)
+        list(APPEND PROFILE_SUPPORTED_OS iossim)
       endif()
       foreach(arch ${DARWIN_ios_ARCHS})
         list(APPEND COMPILER_RT_SUPPORTED_ARCH ${arch})

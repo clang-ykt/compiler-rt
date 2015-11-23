@@ -55,6 +55,11 @@ static atomic_uint32_t dump_once_guard;  // Ensure that CovDump runs only once.
 static atomic_uintptr_t coverage_counter;
 static atomic_uintptr_t caller_callee_counter;
 
+static void ResetGlobalCounters() {
+  return atomic_store(&coverage_counter, 0, memory_order_relaxed);
+  return atomic_store(&caller_callee_counter, 0, memory_order_relaxed);
+}
+
 // pc_array is the array containing the covered PCs.
 // To make the pc_array thread- and async-signal-safe it has to be large enough.
 // 128M counters "ought to be enough for anybody" (4M on 32-bit).
@@ -226,7 +231,8 @@ void CoverageData::InitializeGuardArray(s32 *guards) {
   Enable();  // Make sure coverage is enabled at this point.
   s32 n = guards[0];
   for (s32 j = 1; j <= n; j++) {
-    uptr idx = atomic_fetch_add(&pc_array_index, 1, memory_order_relaxed);
+    uptr idx = atomic_load_relaxed(&pc_array_index);
+    atomic_store_relaxed(&pc_array_index, idx + 1);
     guards[j] = -static_cast<s32>(idx + 1);
   }
 }
@@ -923,6 +929,7 @@ void __sanitizer_cov_trace_basic_block(s32 *id) {
 }
 SANITIZER_INTERFACE_ATTRIBUTE
 void __sanitizer_reset_coverage() {
+  ResetGlobalCounters();
   coverage_data.ReinitializeGuards();
   internal_bzero_aligned16(
       coverage_data.data(),

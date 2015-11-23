@@ -5,11 +5,21 @@ set(PROFILE_SOURCES
   InstrProfiling.c
   InstrProfilingBuffer.c
   InstrProfilingFile.c
+  InstrProfilingWriter.c
   InstrProfilingPlatformDarwin.c
   InstrProfilingPlatformLinux.c
   InstrProfilingPlatformOther.c
   InstrProfilingRuntime.cc
   InstrProfilingUtil.c)
+
+if(UNIX)
+ set(EXTRA_FLAGS
+     -fPIC
+     -Wno-pedantic)
+else()
+ set(EXTRA_FLAGS
+     -fPIC)
+endif()
 
 if(APPLE)
   add_compiler_rt_runtime(clang_rt.profile
@@ -22,7 +32,7 @@ else()
   add_compiler_rt_runtime(clang_rt.profile
     STATIC
     ARCHS ${PROFILE_SUPPORTED_ARCH}
-    CFLAGS -fPIC
+    CFLAGS ${EXTRA_FLAGS}
     SOURCES ${PROFILE_SOURCES}
     PARENT_TARGET profile)
 endif()

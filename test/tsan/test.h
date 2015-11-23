@@ -4,6 +4,11 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <stddef.h>
+#include <sched.h>
+
+#ifdef __APPLE__
+#include <mach/mach_time.h>
+#endif
 
 // TSan-invisible barrier.
 // Tests use it to establish necessary execution order in a way that does not
@@ -25,7 +30,9 @@ void barrier_wait(invisible_barrier_t *barrier) {
     unsigned cur_epoch = (cur >> 8) / (cur & 0xff);
     if (cur_epoch != old_epoch)
       return;
-    usleep(1000);
+    // Can't use usleep, because it leads to spurious "As if synchronized via
+    // sleep" messages which fail some output tests.
+    sched_yield();
   }
 }
 
@@ -57,3 +64,17 @@ void print_address(void *address) {
   fprintf(stderr, format, (unsigned long) address);
 #endif
 }
+
+#ifdef __APPLE__
+unsigned long long monotonic_clock_ns() {
+  static mach_timebase_info_data_t timebase_info;
+  if (timebase_info.denom == 0) mach_timebase_info(&timebase_info);
+  return (mach_absolute_time() * timebase_info.numer) / timebase_info.denom;
+}
+#else
+unsigned long long monotonic_clock_ns() {
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (unsigned long long)t.tv_sec * 1000000000ull + t.tv_nsec;
+}
+#endif

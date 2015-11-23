@@ -1,12 +1,12 @@
 // RUN: %clangxx_tsan %s -o %t -DLockType=PthreadMutex
-// RUN: TSAN_OPTIONS=detect_deadlocks=1 %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-NOT-SECOND
-// RUN: TSAN_OPTIONS="detect_deadlocks=1 second_deadlock_stack=1" %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-SECOND
+// RUN: %env_tsan_opts=detect_deadlocks=1 %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-NOT-SECOND
+// RUN: %env_tsan_opts=detect_deadlocks=1:second_deadlock_stack=1 %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-SECOND
 // RUN: %clangxx_tsan %s -o %t -DLockType=PthreadSpinLock
-// RUN: TSAN_OPTIONS=detect_deadlocks=1 %deflake %run %t | FileCheck %s
+// RUN: %env_tsan_opts=detect_deadlocks=1 %deflake %run %t | FileCheck %s
 // RUN: %clangxx_tsan %s -o %t -DLockType=PthreadRWLock
-// RUN: TSAN_OPTIONS=detect_deadlocks=1 %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-RD
+// RUN: %env_tsan_opts=detect_deadlocks=1 %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-RD
 // RUN: %clangxx_tsan %s -o %t -DLockType=PthreadRecursiveMutex
-// RUN: TSAN_OPTIONS=detect_deadlocks=1 %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-REC
+// RUN: %env_tsan_opts=detect_deadlocks=1 %deflake %run %t | FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-REC
 #include "test.h"
 #undef NDEBUG
 #include <assert.h>
@@ -56,6 +56,7 @@ class PthreadRecursiveMutex : public PthreadMutex {
   static bool supports_recursive_lock() { return true; }
 };
 
+#ifndef __APPLE__
 class PthreadSpinLock {
  public:
   PthreadSpinLock() { assert(0 == pthread_spin_init(&mu_, 0)); }
@@ -76,6 +77,9 @@ class PthreadSpinLock {
   pthread_spinlock_t mu_;
   char padding_[64 - sizeof(pthread_spinlock_t)];
 };
+#else
+class PthreadSpinLock : public PthreadMutex { };
+#endif
 
 class PthreadRWLock {
  public:
@@ -95,7 +99,7 @@ class PthreadRWLock {
 
  private:
   pthread_rwlock_t mu_;
-  char padding_[64 - sizeof(pthread_rwlock_t)];
+  char padding_[256 - sizeof(pthread_rwlock_t)];
 };
 
 class LockTest {
