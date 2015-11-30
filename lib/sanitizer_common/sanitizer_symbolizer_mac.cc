@@ -33,7 +33,7 @@ bool DlAddrSymbolizer::SymbolizePC(uptr addr, SymbolizedStack *stack) {
   int result = dladdr((const void *)addr, &info);
   if (!result) return false;
   const char *demangled = DemangleCXXABI(info.dli_sname);
-  stack->info.function = internal_strdup(demangled);
+  stack->info.function = demangled ? internal_strdup(demangled) : nullptr;
   return true;
 }
 
@@ -121,6 +121,12 @@ static bool ParseCommandOutput(const char *str, uptr addr, char **out_name,
   const char *rest = trim;
   char *symbol_name;
   rest = ExtractTokenUpToDelimiter(rest, " (in ", &symbol_name);
+  if (rest[0] == '\0') {
+    InternalFree(symbol_name);
+    InternalFree(trim);
+    return false;
+  }
+
   if (internal_strncmp(symbol_name, "0x", 2) != 0)
     *out_name = symbol_name;
   else
