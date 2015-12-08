@@ -29,6 +29,7 @@ check_cxx_compiler_flag(-ftls-model=initial-exec COMPILER_RT_HAS_FTLS_MODEL_INIT
 check_cxx_compiler_flag(-fno-lto             COMPILER_RT_HAS_FNO_LTO_FLAG)
 check_cxx_compiler_flag(-msse3               COMPILER_RT_HAS_MSSE3_FLAG)
 check_cxx_compiler_flag(-std=c99             COMPILER_RT_HAS_STD_C99_FLAG)
+check_cxx_compiler_flag(--sysroot=.          COMPILER_RT_HAS_SYSROOT_FLAG)
 
 if(NOT WIN32 AND NOT CYGWIN)
   # MinGW warns if -fvisibility-inlines-hidden is used.
@@ -560,17 +561,10 @@ else()
 endif()
 
 if (COMPILER_RT_HAS_SANITIZER_COMMON AND TSAN_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Linux|FreeBSD")
+    OS_NAME MATCHES "Darwin|Linux|FreeBSD")
   set(COMPILER_RT_HAS_TSAN TRUE)
 else()
   set(COMPILER_RT_HAS_TSAN FALSE)
-endif()
-
-if(APPLE)
-  option(COMPILER_RT_ENABLE_TSAN_OSX "Enable building TSan for OS X - Experimental" Off)
-  if(COMPILER_RT_ENABLE_TSAN_OSX)
-    set(COMPILER_RT_HAS_TSAN TRUE)
-  endif()
 endif()
 
 if (COMPILER_RT_HAS_SANITIZER_COMMON AND UBSAN_SUPPORTED_ARCH AND

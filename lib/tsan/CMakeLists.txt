@@ -8,13 +8,19 @@ set(TSAN_CFLAGS ${SANITIZER_COMMON_CFLAGS})
 append_list_if(COMPILER_RT_HAS_FPIE_FLAG -fPIE TSAN_CFLAGS)
 append_no_rtti_flag(TSAN_CFLAGS)
 
+if(COMPILER_RT_TSAN_DEBUG_OUTPUT)
+  # Add extra debug information to TSan runtime. This configuration is rarely
+  # used, but we need to support it so that debug output will not bitrot.
+  list(APPEND TSAN_CFLAGS -DTSAN_COLLECT_STATS=1
+                          -DTSAN_DEBUG_OUTPUT=2)
+endif()
+
 set(TSAN_RTL_CFLAGS ${TSAN_CFLAGS})
 append_list_if(COMPILER_RT_HAS_MSSE3_FLAG -msse3 TSAN_RTL_CFLAGS)
 append_list_if(SANITIZER_LIMIT_FRAME_SIZE -Wframe-larger-than=512
                TSAN_RTL_CFLAGS)
 append_list_if(COMPILER_RT_HAS_WGLOBAL_CONSTRUCTORS_FLAG -Wglobal-constructors
                TSAN_RTL_CFLAGS)
-# FIXME: Add support for --sysroot=. compile flag:
 
 set(TSAN_SOURCES
   rtl/tsan_clock.cc
@@ -47,6 +53,7 @@ set(TSAN_CXX_SOURCES
 
 if(APPLE)
   list(APPEND TSAN_SOURCES
+    rtl/tsan_interceptors_mac.cc
     rtl/tsan_libdispatch_mac.cc
     rtl/tsan_platform_mac.cc
     rtl/tsan_platform_posix.cc)
@@ -113,6 +120,16 @@ if(APPLE)
     ARCHS ${TSAN_SUPPORTED_ARCH}
     SOURCES ${TSAN_SOURCES} ${TSAN_CXX_SOURCES} ${TSAN_ASM_SOURCES}
     CFLAGS ${TSAN_RTL_CFLAGS})
+
+  # Build and check Go runtime.
+  set(BUILDGO_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/go/buildgo.sh)
+  add_custom_target(GotsanRuntimeCheck
+    COMMAND env "CC=${CMAKE_C_COMPILER} ${OSX_SYSROOT_FLAG}"
+            IN_TMPDIR=1 SILENT=1 ${BUILDGO_SCRIPT}
+    DEPENDS tsan ${BUILDGO_SCRIPT}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/go
+    COMMENT "Checking TSan Go runtime..."
+    VERBATIM)
 else()
   foreach(arch ${TSAN_SUPPORTED_ARCH})
     if(arch STREQUAL "x86_64")
@@ -168,6 +185,18 @@ else()
 endif()
 
 add_dependencies(compiler-rt tsan)
+
+# Make sure that non-platform-specific files don't include any system headers.
+if(COMPILER_RT_HAS_SYSROOT_FLAG)
+  file(GLOB _tsan_generic_sources rtl/tsan*)
+  file(GLOB _tsan_platform_sources rtl/tsan*posix* rtl/tsan*mac*
+                                   rtl/tsan*linux*)
+  list(REMOVE_ITEM _tsan_generic_sources ${_tsan_platform_sources})
+  message(STATUS "platform: ${_tsan_platform_sources}")
+  message(STATUS "generic: ${_tsan_generic_sources}")
+  set_source_files_properties(${_tsan_generic_sources}
+    PROPERTIES COMPILE_FLAGS "--sysroot=.")
+endif()
 
 # Build libcxx instrumented with TSan.
 if(COMPILER_RT_HAS_LIBCXX_SOURCES AND
