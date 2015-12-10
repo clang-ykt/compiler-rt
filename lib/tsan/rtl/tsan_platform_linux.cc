@@ -109,7 +109,8 @@ void FillProfileCallback(uptr p, uptr rss, bool file,
 }
 
 void WriteMemoryProfile(char *buf, uptr buf_size, uptr nthread, uptr nlive) {
-  uptr mem[MemCount] = {};
+  uptr mem[MemCount];
+  internal_memset(mem, 0, sizeof(mem[0]) * MemCount);
   __sanitizer::GetMemoryProfile(FillProfileCallback, mem, 7);
   StackDepotStats *stacks = StackDepotGetStats();
   internal_snprintf(buf, buf_size,
@@ -244,11 +245,19 @@ void InitializePlatformEarly() {
 #ifdef TSAN_RUNTIME_VMA
   vmaSize =
     (MostSignificantSetBitIndex(GET_CURRENT_FRAME()) + 1);
+#if defined(__aarch64__)
   if (vmaSize != 39 && vmaSize != 42) {
     Printf("FATAL: ThreadSanitizer: unsupported VMA range\n");
     Printf("FATAL: Found %d - Supported 39 and 42\n", vmaSize);
     Die();
   }
+#elif defined(__powerpc64__)
+  if (vmaSize != 44 && vmaSize != 46) {
+    Printf("FATAL: ThreadSanitizer: unsupported VMA range\n");
+    Printf("FATAL: Found %d - Supported 42 and 46\n", vmaSize);
+    Die();
+  }
+#endif
 #endif
 }
 
@@ -300,7 +309,7 @@ bool IsGlobalVar(uptr addr) {
 // This is required to properly "close" the fds, because we do not see internal
 // closes within glibc. The code is a pure hack.
 int ExtractResolvFDs(void *state, int *fds, int nfd) {
-#if SANITIZER_LINUX
+#if SANITIZER_LINUX && !SANITIZER_ANDROID
   int cnt = 0;
   __res_state *statp = (__res_state*)state;
   for (int i = 0; i < MAXNS && cnt < nfd; i++) {

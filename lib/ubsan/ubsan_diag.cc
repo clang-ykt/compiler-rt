@@ -45,7 +45,7 @@ static void MaybePrintStackTrace(uptr pc, uptr bp) {
 
 static const char *ConvertTypeToString(ErrorType Type) {
   switch (Type) {
-#define UBSAN_CHECK(Name, SummaryKind, FlagName)                               \
+#define UBSAN_CHECK(Name, SummaryKind, FSanitizeFlagName)                      \
   case ErrorType::Name:                                                        \
     return SummaryKind;
 #include "ubsan_checks.inc"
@@ -365,7 +365,7 @@ ScopedReport::~ScopedReport() {
   MaybePrintStackTrace(Opts.pc, Opts.bp);
   MaybeReportErrorSummary(SummaryLoc, Type);
   CommonSanitizerReportMutex.Unlock();
-  if (Opts.DieAfterReport || flags()->halt_on_error)
+  if (flags()->halt_on_error)
     Die();
 }
 

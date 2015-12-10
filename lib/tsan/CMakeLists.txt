@@ -151,6 +151,11 @@ else()
       # Pass ASM file directly to the C++ compiler.
       set_source_files_properties(${TSAN_ASM_SOURCES} PROPERTIES
         LANGUAGE C)
+   elseif(arch MATCHES "powerpc64|powerpc64le")
+     set(TSAN_ASM_SOURCES rtl/tsan_rtl_ppc64.S)
+     # Pass ASM file directly to the C++ compiler.
+     set_source_files_properties(${TSAN_ASM_SOURCES} PROPERTIES
+       LANGUAGE C)
     else()
       set(TSAN_ASM_SOURCES)
     endif()
@@ -192,8 +197,6 @@ if(COMPILER_RT_HAS_SYSROOT_FLAG)
   file(GLOB _tsan_platform_sources rtl/tsan*posix* rtl/tsan*mac*
                                    rtl/tsan*linux*)
   list(REMOVE_ITEM _tsan_generic_sources ${_tsan_platform_sources})
-  message(STATUS "platform: ${_tsan_platform_sources}")
-  message(STATUS "generic: ${_tsan_generic_sources}")
   set_source_files_properties(${_tsan_generic_sources}
     PROPERTIES COMPILE_FLAGS "--sysroot=.")
 endif()
