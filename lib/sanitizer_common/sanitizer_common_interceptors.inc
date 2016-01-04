@@ -1691,16 +1691,19 @@ static int wrapped_gl_stat(const char *s, void *st) {
   return pglob_copy->gl_stat(s, st);
 }
 
+static const __sanitizer_glob_t kGlobCopy = {
+      0,                  0,                   0,
+      0,                  wrapped_gl_closedir, wrapped_gl_readdir,
+      wrapped_gl_opendir, wrapped_gl_lstat,    wrapped_gl_stat};
+
 INTERCEPTOR(int, glob, const char *pattern, int flags,
             int (*errfunc)(const char *epath, int eerrno),
             __sanitizer_glob_t *pglob) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, glob, pattern, flags, errfunc, pglob);
   COMMON_INTERCEPTOR_READ_STRING(ctx, pattern, 0);
-  __sanitizer_glob_t glob_copy = {
-      0,                  0,                   0,
-      0,                  wrapped_gl_closedir, wrapped_gl_readdir,
-      wrapped_gl_opendir, wrapped_gl_lstat,    wrapped_gl_stat};
+  __sanitizer_glob_t glob_copy;
+  internal_memcpy(&glob_copy, &kGlobCopy, sizeof(glob_copy));
   if (flags & glob_altdirfunc) {
     Swap(pglob->gl_closedir, glob_copy.gl_closedir);
     Swap(pglob->gl_readdir, glob_copy.gl_readdir);
@@ -1728,10 +1731,8 @@ INTERCEPTOR(int, glob64, const char *pattern, int flags,
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, glob64, pattern, flags, errfunc, pglob);
   COMMON_INTERCEPTOR_READ_STRING(ctx, pattern, 0);
-  __sanitizer_glob_t glob_copy = {
-      0,                  0,                   0,
-      0,                  wrapped_gl_closedir, wrapped_gl_readdir,
-      wrapped_gl_opendir, wrapped_gl_lstat,    wrapped_gl_stat};
+  __sanitizer_glob_t glob_copy;
+  internal_memcpy(&glob_copy, &kGlobCopy, sizeof(glob_copy));
   if (flags & glob_altdirfunc) {
     Swap(pglob->gl_closedir, glob_copy.gl_closedir);
     Swap(pglob->gl_readdir, glob_copy.gl_readdir);
@@ -4768,7 +4769,7 @@ INTERCEPTOR(int, __woverflow, __sanitizer_FILE *fp, int ch) {
 INTERCEPTOR(__sanitizer_FILE *, fopen, const char *path, const char *mode) {
   void *ctx;
   COMMON_INTERCEPTOR_ENTER(ctx, fopen, path, mode);
-  COMMON_INTERCEPTOR_READ_RANGE(ctx, path, REAL(strlen)(path) + 1);
+  if (path) COMMON_INTERCEPTOR_READ_RANGE(ctx, path, REAL(strlen)(path) + 1);
   COMMON_INTERCEPTOR_READ_RANGE(ctx, mode, REAL(strlen)(mode) + 1);
   __sanitizer_FILE *res = REAL(fopen)(path, mode);
   COMMON_INTERCEPTOR_FILE_OPEN(ctx, res, path);
@@ -5284,6 +5285,36 @@ INTERCEPTOR(SSIZE_T, process_vm_writev, int pid, __sanitizer_iovec *local_iov,
 #define INIT_PROCESS_VM_READV
 #endif
 
+#if SANITIZER_INTERCEPT_CTERMID
+INTERCEPTOR(char *, ctermid, char *s) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, ctermid, s);
+  char *res = REAL(ctermid)(s);
+  if (res) {
+    COMMON_INTERCEPTOR_INITIALIZE_RANGE(res, REAL(strlen)(res) + 1);
+  }
+  return res;
+}
+#define INIT_CTERMID COMMON_INTERCEPT_FUNCTION(ctermid);
+#else
+#define INIT_CTERMID
+#endif
+
+#if SANITIZER_INTERCEPT_CTERMID_R
+INTERCEPTOR(char *, ctermid_r, char *s) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, ctermid_r, s);
+  char *res = REAL(ctermid_r)(s);
+  if (res) {
+    COMMON_INTERCEPTOR_INITIALIZE_RANGE(res, REAL(strlen)(res) + 1);
+  }
+  return res;
+}
+#define INIT_CTERMID_R COMMON_INTERCEPT_FUNCTION(ctermid_r);
+#else
+#define INIT_CTERMID_R
+#endif
+
 static void InitializeCommonInterceptors() {
   static u64 metadata_mem[sizeof(MetadataHashMap) / sizeof(u64) + 1];
   interceptor_metadata_map = new((void *)&metadata_mem) MetadataHashMap();
@@ -5458,4 +5489,6 @@ static void InitializeCommonInterceptors() {
   INIT_PTHREAD_SETCANCEL;
   INIT_MINCORE;
   INIT_PROCESS_VM_READV;
+  INIT_CTERMID;
+  INIT_CTERMID_R;
 }
