@@ -355,9 +355,8 @@ void LoadedModule::addAddressRange(uptr beg, uptr end, bool executable) {
 }
 
 bool LoadedModule::containsAddress(uptr address) const {
-  for (Iterator iter = ranges(); iter.hasNext();) {
-    const AddressRange *r = iter.next();
-    if (r->beg <= address && address < r->end)
+  for (const AddressRange &r : ranges()) {
+    if (r.beg <= address && address < r.end)
       return true;
   }
   return false;
@@ -486,6 +485,15 @@ uptr ReadBinaryNameCached(/*out*/char *buf, uptr buf_len) {
   internal_memcpy(buf, binary_name_cache_str, name_len);
   buf[name_len] = '\0';
   return name_len;
+}
+
+void PrintCmdline() {
+  char **argv = GetArgv();
+  if (!argv) return;
+  Printf("\nCommand: ");
+  for (uptr i = 0; argv[i]; ++i)
+    Printf("%s ", argv[i]);
+  Printf("\n\n");
 }
 
 } // namespace __sanitizer
