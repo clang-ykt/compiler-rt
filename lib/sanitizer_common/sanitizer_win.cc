@@ -775,6 +775,22 @@ char **GetArgv() {
   return 0;
 }
 
+pid_t StartSubprocess(const char *program, const char *const argv[],
+                      fd_t stdin_fd, fd_t stdout_fd, fd_t stderr_fd) {
+  // FIXME: implement on this platform
+  // Should be implemented based on
+  // SymbolizerProcess::StarAtSymbolizerSubprocess
+  // from lib/sanitizer_common/sanitizer_symbolizer_win.cc.
+  return -1;
+}
+
+bool IsProcessRunning(pid_t pid) {
+  // FIXME: implement on this platform.
+  return false;
+}
+
+int WaitForProcess(pid_t pid) { return -1; }
+
 }  // namespace __sanitizer
 
 #endif  // _WIN32
