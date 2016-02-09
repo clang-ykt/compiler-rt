@@ -77,6 +77,8 @@ ASAN_FLAG(bool, print_stats, false,
           "Print various statistics after printing an error message or if "
           "atexit=1.")
 ASAN_FLAG(bool, print_legend, true, "Print the legend for the shadow bytes.")
+ASAN_FLAG(bool, print_scariness, false,
+          "Print the scariness score. Experimental.")
 ASAN_FLAG(bool, atexit, false,
           "If set, prints ASan exit stats even after program terminates "
           "successfully.")
@@ -104,7 +106,7 @@ ASAN_FLAG(bool, alloc_dealloc_mismatch,
           "Report errors on malloc/delete, new/free, new/delete[], etc.")
 
 ASAN_FLAG(bool, new_delete_type_mismatch, true,
-          "Report errors on mismatch betwen size of new and delete.")
+          "Report errors on mismatch between size of new and delete.")
 ASAN_FLAG(
     bool, strict_init_order, false,
     "If true, assume that dynamic initializers can never access globals from "
