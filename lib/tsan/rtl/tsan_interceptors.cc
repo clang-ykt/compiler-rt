@@ -129,7 +129,7 @@ const int PTHREAD_MUTEX_RECURSIVE_NP = 2;
 const int EINVAL = 22;
 const int EBUSY = 16;
 const int EOWNERDEAD = 130;
-#if !SANITIZER_MAC
+#if !SANITIZER_FREEBSD && !SANITIZER_MAC
 const int EPOLL_CTL_ADD = 1;
 #endif
 const int SIGILL = 4;
@@ -138,7 +138,7 @@ const int SIGFPE = 8;
 const int SIGSEGV = 11;
 const int SIGPIPE = 13;
 const int SIGTERM = 15;
-#if defined(__mips__) || SANITIZER_MAC
+#if defined(__mips__) || SANITIZER_FREEBSD || SANITIZER_MAC
 const int SIGBUS = 10;
 const int SIGSYS = 12;
 #else
@@ -2451,7 +2451,7 @@ struct ScopedSyscall {
   }
 };
 
-#if !SANITIZER_MAC
+#if !SANITIZER_FREEBSD && !SANITIZER_MAC
 static void syscall_access_range(uptr pc, uptr p, uptr s, bool write) {
   TSAN_SYSCALL();
   MemoryAccessRange(thr, pc, p, s, write);
