@@ -581,8 +581,11 @@ DEFINE_REAL(int, __sigsetjmp, void *env)
 #endif  // SANITIZER_MAC
 
 TSAN_INTERCEPTOR(void, longjmp, uptr *env, int val) {
+  // Note: if we call REAL(longjmp) in the context of ScopedInterceptor,
+  // bad things will happen. We will jump over ScopedInterceptor dtor and can
+  // leave thr->in_ignored_lib set.
   {
-    SCOPED_TSAN_INTERCEPTOR(longjmp, env, val);
+    SCOPED_INTERCEPTOR_RAW(longjmp, env, val);
   }
   LongJmp(cur_thread(), env);
   REAL(longjmp)(env, val);
@@ -590,7 +593,7 @@ TSAN_INTERCEPTOR(void, longjmp, uptr *env, int val) {
 
 TSAN_INTERCEPTOR(void, siglongjmp, uptr *env, int val) {
   {
-    SCOPED_TSAN_INTERCEPTOR(siglongjmp, env, val);
+    SCOPED_INTERCEPTOR_RAW(siglongjmp, env, val);
   }
   LongJmp(cur_thread(), env);
   REAL(siglongjmp)(env, val);
@@ -1811,17 +1814,6 @@ TSAN_INTERCEPTOR(long_t, sendmsg, int fd, void *msg, int flags) {
   return res;
 }
 
-TSAN_INTERCEPTOR(long_t, recv, int fd, void *buf, long_t len, int flags) {
-  SCOPED_TSAN_INTERCEPTOR(recv, fd, buf, len, flags);
-  if (fd >= 0)
-    FdAccess(thr, pc, fd);
-  int res = REAL(recv)(fd, buf, len, flags);
-  if (res >= 0 && fd >= 0) {
-    FdAcquire(thr, pc, fd);
-  }
-  return res;
-}
-
 TSAN_INTERCEPTOR(int, unlink, char *path) {
   SCOPED_TSAN_INTERCEPTOR(unlink, path);
   Release(thr, pc, File2addr(path));
@@ -1947,6 +1939,18 @@ static void CallUserSignalHandler(ThreadState *thr, bool sync, bool acquire,
     bool sigact, int sig, my_siginfo_t *info, void *uctx) {
   if (acquire)
     Acquire(thr, 0, (uptr)&sigactions[sig]);
+  // Signals are generally asynchronous, so if we receive a signals when
+  // ignores are enabled we should disable ignores. This is critical for sync
+  // and interceptors, because otherwise we can miss syncronization and report
+  // false races.
+  int ignore_reads_and_writes = thr->ignore_reads_and_writes;
+  int ignore_interceptors = thr->ignore_interceptors;
+  int ignore_sync = thr->ignore_sync;
+  if (!ctx->after_multithreaded_fork) {
+    thr->ignore_reads_and_writes = 0;
+    thr->ignore_interceptors = 0;
+    thr->ignore_sync = 0;
+  }
   // Ensure that the handler does not spoil errno.
   const int saved_errno = errno;
   errno = 99;
@@ -1961,6 +1965,11 @@ static void CallUserSignalHandler(ThreadState *thr, bool sync, bool acquire,
       ((sigactionhandler_t)pc)(sig, info, uctx);
     else
       ((sighandler_t)pc)(sig);
+  }
+  if (!ctx->after_multithreaded_fork) {
+    thr->ignore_reads_and_writes = ignore_reads_and_writes;
+    thr->ignore_interceptors = ignore_interceptors;
+    thr->ignore_sync = ignore_sync;
   }
   // We do not detect errno spoiling for SIGTERM,
   // because some SIGTERM handlers do spoil errno but reraise SIGTERM,
@@ -2031,13 +2040,8 @@ void ALWAYS_INLINE rtl_generic_sighandler(bool sigact, int sig,
       (sctx && atomic_load(&sctx->in_blocking_func, memory_order_relaxed))) {
     atomic_fetch_add(&thr->in_signal_handler, 1, memory_order_relaxed);
     if (sctx && atomic_load(&sctx->in_blocking_func, memory_order_relaxed)) {
-      // We ignore interceptors in blocking functions,
-      // temporary enbled them again while we are calling user function.
-      int const i = thr->ignore_interceptors;
-      thr->ignore_interceptors = 0;
       atomic_store(&sctx->in_blocking_func, 0, memory_order_relaxed);
       CallUserSignalHandler(thr, sync, true, sigact, sig, info, ctx);
-      thr->ignore_interceptors = i;
       atomic_store(&sctx->in_blocking_func, 1, memory_order_relaxed);
     } else {
       // Be very conservative with when we do acquire in this case.
@@ -2075,7 +2079,10 @@ static void rtl_sigaction(int sig, my_siginfo_t *info, void *ctx) {
 }
 
 TSAN_INTERCEPTOR(int, sigaction, int sig, sigaction_t *act, sigaction_t *old) {
-  SCOPED_TSAN_INTERCEPTOR(sigaction, sig, act, old);
+  // Note: if we call REAL(sigaction) directly for any reason without proxying
+  // the signal handler through rtl_sigaction, very bad things will happen.
+  // The handler will run synchronously and corrupt tsan per-thread state.
+  SCOPED_INTERCEPTOR_RAW(sigaction, sig, act, old);
   if (old)
     internal_memcpy(old, &sigactions[sig], sizeof(*old));
   if (act == 0)
@@ -2698,7 +2705,6 @@ void InitializeInterceptors() {
 
   TSAN_INTERCEPT(send);
   TSAN_INTERCEPT(sendmsg);
-  TSAN_INTERCEPT(recv);
 
   TSAN_INTERCEPT(unlink);
   TSAN_INTERCEPT(tmpfile);
