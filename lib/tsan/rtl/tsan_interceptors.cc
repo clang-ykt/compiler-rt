@@ -87,10 +87,10 @@ struct ucontext_t {
 #endif
 
 #if defined(__x86_64__) || defined(__mips__) \
-  || (defined(__powerpc64__) && defined(__BIG_ENDIAN__))
+  || (defined(__powerpc64__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #define PTHREAD_ABI_BASE  "GLIBC_2.3.2"
 #elif defined(__aarch64__) || (defined(__powerpc64__) \
-  && defined(__LITTLE_ENDIAN__))
+  && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 #define PTHREAD_ABI_BASE  "GLIBC_2.17"
 #endif
 
@@ -667,13 +667,6 @@ TSAN_INTERCEPTOR(uptr, malloc_usable_size, void *p) {
   return user_alloc_usable_size(p);
 }
 #endif
-
-TSAN_INTERCEPTOR(uptr, strlen, const char *s) {
-  SCOPED_TSAN_INTERCEPTOR(strlen, s);
-  uptr len = internal_strlen(s);
-  MemoryAccessRange(thr, pc, (uptr)s, len + 1, false);
-  return len;
-}
 
 TSAN_INTERCEPTOR(void*, memset, void *dst, int v, uptr size) {
   // On FreeBSD we get here from libthr internals on thread initialization.
@@ -2618,7 +2611,6 @@ void InitializeInterceptors() {
   TSAN_MAYBE_INTERCEPT_PVALLOC;
   TSAN_INTERCEPT(posix_memalign);
 
-  TSAN_INTERCEPT(strlen);
   TSAN_INTERCEPT(memset);
   TSAN_INTERCEPT(memcpy);
   TSAN_INTERCEPT(memmove);
