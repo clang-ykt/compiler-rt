@@ -12,16 +12,16 @@
 // RUN:   | sed -e 's/.*"\(.*libclang_rt.tsan_osx_dynamic.dylib\)".*/\1/'`
 
 // Launching a non-instrumented binary that dlopen's an instrumented library should fail.
-// RUN: not %run %t-noninstr %t.so 2>&1 | FileCheck %s --check-prefix=CHECK-FAIL
+// RUN: not %run %t %t.so 2>&1 | FileCheck %s --check-prefix=CHECK-FAIL
 // Launching a non-instrumented binary with an explicit DYLD_INSERT_LIBRARIES should work.
-// RUN: DYLD_INSERT_LIBRARIES=$TSAN_DYLIB_PATH %run %t-noninstr %t.so 2>&1 | FileCheck %s
+// RUN: DYLD_INSERT_LIBRARIES=$TSAN_DYLIB_PATH %run %t %t.so 2>&1 | FileCheck %s
 
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdio.h>
 
 #if defined(SHARED_LIB)
-void foo() {
+extern "C" void foo() {
   fprintf(stderr, "Hello world.\n");
 }
 #else  // defined(SHARED_LIB)

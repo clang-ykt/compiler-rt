@@ -554,10 +554,9 @@ void LeakyResetEnv(const char *name, const char *name_value) {
   }
 }
 
-static bool reexec_disabled = false;
-
-void DisableReexec() {
-  reexec_disabled = true;
+SANITIZER_WEAK_CXX_DEFAULT_IMPL
+bool ReexecDisabled() {
+  return false;
 }
 
 extern "C" double dyldVersionNumber;
@@ -573,7 +572,7 @@ bool DyldNeedsEnvVariable() {
 }
 
 void MaybeReexec() {
-  if (reexec_disabled) return;
+  if (ReexecDisabled()) return;
 
   // Make sure the dynamic runtime library is preloaded so that the
   // wrappers work. If it is not, set DYLD_INSERT_LIBRARIES and re-exec
