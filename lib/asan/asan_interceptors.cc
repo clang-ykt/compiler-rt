@@ -111,7 +111,7 @@ static inline bool RangesOverlap(const char *offset1, uptr length1,
 } while (0)
 
 static inline uptr MaybeRealStrnlen(const char *s, uptr maxlen) {
-#if ASAN_INTERCEPT_STRNLEN
+#if SANITIZER_INTERCEPT_STRNLEN
   if (REAL(strnlen)) {
     return REAL(strnlen)(s, maxlen);
   }
@@ -196,6 +196,10 @@ DECLARE_REAL_AND_INTERCEPTOR(void, free, void *)
   } else {                                                                     \
     *begin = *end = 0;                                                         \
   }
+// Asan needs custom handling of these:
+#undef SANITIZER_INTERCEPT_MEMSET
+#undef SANITIZER_INTERCEPT_MEMMOVE
+#undef SANITIZER_INTERCEPT_MEMCPY
 #include "sanitizer_common/sanitizer_common_interceptors.inc"
 
 // Syscall interceptors don't have contexts, we don't support suppressions
@@ -544,7 +548,6 @@ INTERCEPTOR(char*, strcpy, char *to, const char *from) {  // NOLINT
   return REAL(strcpy)(to, from);  // NOLINT
 }
 
-#if ASAN_INTERCEPT_STRDUP
 INTERCEPTOR(char*, strdup, const char *s) {
   void *ctx;
   ASAN_INTERCEPTOR_ENTER(ctx, strdup);
@@ -559,7 +562,6 @@ INTERCEPTOR(char*, strdup, const char *s) {
   REAL(memcpy)(new_mem, s, length + 1);
   return reinterpret_cast<char*>(new_mem);
 }
-#endif
 
 INTERCEPTOR(SIZE_T, wcslen, const wchar_t *s) {
   void *ctx;
@@ -584,19 +586,6 @@ INTERCEPTOR(char*, strncpy, char *to, const char *from, uptr size) {
   }
   return REAL(strncpy)(to, from, size);
 }
-
-#if ASAN_INTERCEPT_STRNLEN
-INTERCEPTOR(uptr, strnlen, const char *s, uptr maxlen) {
-  void *ctx;
-  ASAN_INTERCEPTOR_ENTER(ctx, strnlen);
-  ENSURE_ASAN_INITED();
-  uptr length = REAL(strnlen)(s, maxlen);
-  if (flags()->replace_str) {
-    ASAN_READ_RANGE(ctx, s, Min(length + 1, maxlen));
-  }
-  return length;
-}
-#endif  // ASAN_INTERCEPT_STRNLEN
 
 INTERCEPTOR(long, strtol, const char *nptr,  // NOLINT
             char **endptr, int base) {
@@ -729,12 +718,7 @@ void InitializeAsanInterceptors() {
   ASAN_INTERCEPT_FUNC(wcslen);
   ASAN_INTERCEPT_FUNC(strncat);
   ASAN_INTERCEPT_FUNC(strncpy);
-#if ASAN_INTERCEPT_STRDUP
   ASAN_INTERCEPT_FUNC(strdup);
-#endif
-#if ASAN_INTERCEPT_STRNLEN
-  ASAN_INTERCEPT_FUNC(strnlen);
-#endif
 #if ASAN_INTERCEPT_INDEX && ASAN_USE_ALIAS_ATTRIBUTE_FOR_INDEX
   ASAN_INTERCEPT_FUNC(index);
 #endif
