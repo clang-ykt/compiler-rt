@@ -230,7 +230,10 @@ bool FileExists(const char *filename) {
 }
 
 uptr GetTid() {
-  return reinterpret_cast<uptr>(pthread_self());
+  // FIXME: This can potentially get truncated on 32-bit, where uptr is 4 bytes.
+  uint64_t tid;
+  pthread_threadid_np(nullptr, &tid);
+  return tid;
 }
 
 void GetThreadStackTopAndBottom(bool at_initialization, uptr *stack_top,
@@ -564,10 +567,14 @@ bool ReexecDisabled() {
   return false;
 }
 
-extern "C" double dyldVersionNumber;
+extern "C" SANITIZER_WEAK_ATTRIBUTE double dyldVersionNumber;
 static const double kMinDyldVersionWithAutoInterposition = 360.0;
 
 bool DyldNeedsEnvVariable() {
+  // Although sanitizer support was added to LLVM on OS X 10.7+, GCC users
+  // still may want use them on older systems. On older Darwin platforms, dyld
+  // doesn't export dyldVersionNumber symbol and we simply return true.
+  if (!&dyldVersionNumber) return true;
   // If running on OS X 10.11+ or iOS 9.0+, dyld will interpose even if
   // DYLD_INSERT_LIBRARIES is not set. However, checking OS version via
   // GetMacosVersion() doesn't work for the simulator. Let's instead check
