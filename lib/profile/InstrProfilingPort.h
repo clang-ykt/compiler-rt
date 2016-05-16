@@ -14,10 +14,12 @@
 #define COMPILER_RT_ALIGNAS(x) __declspec(align(x))
 #define COMPILER_RT_VISIBILITY
 #define COMPILER_RT_WEAK __declspec(selectany)
+#define COMPILER_RT_ALLOCA _alloca
 #elif __GNUC__
 #define COMPILER_RT_ALIGNAS(x) __attribute__((aligned(x)))
 #define COMPILER_RT_VISIBILITY __attribute__((visibility("hidden")))
 #define COMPILER_RT_WEAK __attribute__((weak))
+#define COMPILER_RT_ALLOCA __builtin_alloca
 #endif
 
 #define COMPILER_RT_SECTION(Sect) __attribute__((section(Sect)))
@@ -25,7 +27,7 @@
 #define COMPILER_RT_MAX_HOSTLEN 128
 #ifdef _MSC_VER
 #define COMPILER_RT_GETHOSTNAME(Name, Len) gethostname(Name, Len)
-#elif defined(__PS4__)
+#elif defined(__ORBIS__)
 #define COMPILER_RT_GETHOSTNAME(Name, Len) (-1)
 #else
 #define COMPILER_RT_GETHOSTNAME(Name, Len) lprofGetHostName(Name, Len)

@@ -740,6 +740,7 @@ TSAN_INTERCEPTOR(int, munmap, void *addr, long_t sz) {
   if (sz != 0) {
     // If sz == 0, munmap will return EINVAL and don't unmap any memory.
     DontNeedShadowFor((uptr)addr, sz);
+    ScopedGlobalProcessor sgp;
     ctx->metamap.ResetRange(thr->proc(), (uptr)addr, (uptr)sz);
   }
   int res = REAL(munmap)(addr, sz);
@@ -1348,73 +1349,6 @@ TSAN_INTERCEPTOR(int, pthread_once, void *o, void (*f)()) {
   }
   return 0;
 }
-
-#if SANITIZER_LINUX && !SANITIZER_ANDROID
-TSAN_INTERCEPTOR(int, __xstat64, int version, const char *path, void *buf) {
-  SCOPED_TSAN_INTERCEPTOR(__xstat64, version, path, buf);
-  READ_STRING(thr, pc, path, 0);
-  return REAL(__xstat64)(version, path, buf);
-}
-#define TSAN_MAYBE_INTERCEPT___XSTAT64 TSAN_INTERCEPT(__xstat64)
-#else
-#define TSAN_MAYBE_INTERCEPT___XSTAT64
-#endif
-
-#if SANITIZER_LINUX && !SANITIZER_ANDROID
-TSAN_INTERCEPTOR(int, stat64, const char *path, void *buf) {
-  SCOPED_TSAN_INTERCEPTOR(__xstat64, 0, path, buf);
-  READ_STRING(thr, pc, path, 0);
-  return REAL(__xstat64)(0, path, buf);
-}
-#define TSAN_MAYBE_INTERCEPT_STAT64 TSAN_INTERCEPT(stat64)
-#else
-#define TSAN_MAYBE_INTERCEPT_STAT64
-#endif
-
-#if SANITIZER_LINUX && !SANITIZER_ANDROID
-TSAN_INTERCEPTOR(int, __lxstat, int version, const char *path, void *buf) {
-  SCOPED_TSAN_INTERCEPTOR(__lxstat, version, path, buf);
-  READ_STRING(thr, pc, path, 0);
-  return REAL(__lxstat)(version, path, buf);
-}
-#define TSAN_MAYBE_INTERCEPT___LXSTAT TSAN_INTERCEPT(__lxstat)
-#else
-#define TSAN_MAYBE_INTERCEPT___LXSTAT
-#endif
-
-TSAN_INTERCEPTOR(int, lstat, const char *path, void *buf) {
-#if SANITIZER_FREEBSD || SANITIZER_MAC || SANITIZER_ANDROID
-  SCOPED_TSAN_INTERCEPTOR(lstat, path, buf);
-  READ_STRING(thr, pc, path, 0);
-  return REAL(lstat)(path, buf);
-#else
-  SCOPED_TSAN_INTERCEPTOR(__lxstat, 0, path, buf);
-  READ_STRING(thr, pc, path, 0);
-  return REAL(__lxstat)(0, path, buf);
-#endif
-}
-
-#if SANITIZER_LINUX && !SANITIZER_ANDROID
-TSAN_INTERCEPTOR(int, __lxstat64, int version, const char *path, void *buf) {
-  SCOPED_TSAN_INTERCEPTOR(__lxstat64, version, path, buf);
-  READ_STRING(thr, pc, path, 0);
-  return REAL(__lxstat64)(version, path, buf);
-}
-#define TSAN_MAYBE_INTERCEPT___LXSTAT64 TSAN_INTERCEPT(__lxstat64)
-#else
-#define TSAN_MAYBE_INTERCEPT___LXSTAT64
-#endif
-
-#if SANITIZER_LINUX && !SANITIZER_ANDROID
-TSAN_INTERCEPTOR(int, lstat64, const char *path, void *buf) {
-  SCOPED_TSAN_INTERCEPTOR(__lxstat64, 0, path, buf);
-  READ_STRING(thr, pc, path, 0);
-  return REAL(__lxstat64)(0, path, buf);
-}
-#define TSAN_MAYBE_INTERCEPT_LSTAT64 TSAN_INTERCEPT(lstat64)
-#else
-#define TSAN_MAYBE_INTERCEPT_LSTAT64
-#endif
 
 #if SANITIZER_LINUX && !SANITIZER_ANDROID
 TSAN_INTERCEPTOR(int, __fxstat, int version, int fd, void *buf) {
@@ -2594,12 +2528,6 @@ void InitializeInterceptors() {
 
   TSAN_INTERCEPT(pthread_once);
 
-  TSAN_MAYBE_INTERCEPT_STAT64;
-  TSAN_MAYBE_INTERCEPT___XSTAT64;
-  TSAN_INTERCEPT(lstat);
-  TSAN_MAYBE_INTERCEPT___LXSTAT;
-  TSAN_MAYBE_INTERCEPT_LSTAT64;
-  TSAN_MAYBE_INTERCEPT___LXSTAT64;
   TSAN_INTERCEPT(fstat);
   TSAN_MAYBE_INTERCEPT___FXSTAT;
   TSAN_MAYBE_INTERCEPT_FSTAT64;
