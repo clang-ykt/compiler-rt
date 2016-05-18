@@ -553,7 +553,14 @@ static void AsanInitInternal() {
 
   InitializeSuppressions();
 
-  Symbolizer::LateInitialize();
+  {
+#if CAN_SANITIZE_LEAKS
+    // LateInitialize() calls dlsym, which can allocate an error string buffer
+    // in the TLS.  Let's ignore the allocation to avoid reporting a leak.
+    __lsan::ScopedInterceptorDisabler disabler;
+#endif
+    Symbolizer::LateInitialize();
+  }
 
   VReport(1, "AddressSanitizer Init done\n");
 }
