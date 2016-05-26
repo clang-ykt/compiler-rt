@@ -16,9 +16,11 @@
 #include "esan_flags.h"
 #include "esan_interface_internal.h"
 #include "esan_shadow.h"
+#include "cache_frag.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_flag_parser.h"
 #include "sanitizer_common/sanitizer_flags.h"
+#include "working_set.h"
 
 // See comment below.
 extern "C" {
@@ -30,6 +32,15 @@ namespace __esan {
 bool EsanIsInitialized;
 ToolType WhichTool;
 ShadowMapping Mapping;
+
+// Different tools use different scales within the same shadow mapping scheme.
+// The scale used here must match that used by the compiler instrumentation.
+// This array is indexed by the ToolType enum.
+static const uptr ShadowScale[] = {
+  0, // ESAN_None.
+  2, // ESAN_CacheFrag: 4B:1B, so 4 to 1 == >>2.
+  6, // ESAN_WorkingSet: 64B:1B, so 64 to 1 == >>6.
+};
 
 // We are combining multiple performance tuning tools under the umbrella of
 // one EfficiencySanitizer super-tool.  Most of our tools have very similar
@@ -57,6 +68,8 @@ void processRangeAccess(uptr PC, uptr Addr, int Size, bool IsWrite) {
   if (WhichTool == ESAN_CacheFrag) {
     // TODO(bruening): add shadow mapping and update shadow bits here.
     // We'll move this to cache_frag.cpp once we have something.
+  } else if (WhichTool == ESAN_WorkingSet) {
+    processRangeAccessWorkingSet(PC, Addr, Size, IsWrite);
   }
 }
 
@@ -113,10 +126,7 @@ static bool verifyShadowScheme() {
 static void initializeShadow() {
   DCHECK(verifyShadowScheme());
 
-  if (WhichTool == ESAN_CacheFrag)
-    Mapping.initialize(2); // 4B:1B, so 4 to 1 == >>2.
-  else
-    UNREACHABLE("unknown tool shadow mapping");
+  Mapping.initialize(ShadowScale[WhichTool]);
 
   VPrintf(1, "Shadow scale=%d offset=%p\n", Mapping.Scale, Mapping.Offset);
 
@@ -157,7 +167,7 @@ void initializeLibrary(ToolType Tool) {
   ::__cxa_atexit((void (*)())finalizeLibrary);
 
   VPrintf(1, "in esan::%s\n", __FUNCTION__);
-  if (WhichTool != ESAN_CacheFrag) {
+  if (WhichTool <= ESAN_None || WhichTool >= ESAN_Max) {
     Printf("ERROR: unknown tool %d requested\n", WhichTool);
     Die();
   }
@@ -165,18 +175,39 @@ void initializeLibrary(ToolType Tool) {
   initializeShadow();
   initializeInterceptors();
 
+  if (WhichTool == ESAN_CacheFrag) {
+    initializeCacheFrag();
+  } else if (WhichTool == ESAN_WorkingSet) {
+    initializeWorkingSet();
+  }
+
   EsanIsInitialized = true;
 }
 
 int finalizeLibrary() {
   VPrintf(1, "in esan::%s\n", __FUNCTION__);
   if (WhichTool == ESAN_CacheFrag) {
-    // FIXME NYI: we need to add sampling + callstack gathering and have a
-    // strategy for how to generate a final report.
-    // We'll move this to cache_frag.cpp once we have something.
-    Report("%s is not finished: nothing yet to report\n", SanitizerToolName);
+    return finalizeCacheFrag();
+  } else if (WhichTool == ESAN_WorkingSet) {
+    return finalizeWorkingSet();
   }
   return 0;
+}
+
+void processCompilationUnitInit(void *Ptr) {
+  VPrintf(2, "in esan::%s\n", __FUNCTION__);
+  if (WhichTool == ESAN_CacheFrag) {
+    processCacheFragCompilationUnitInit(Ptr);
+  }
+}
+
+// This is called when the containing module is unloaded.
+// For the main executable module, this is called after finalizeLibrary.
+void processCompilationUnitExit(void *Ptr) {
+  VPrintf(2, "in esan::%s\n", __FUNCTION__);
+  if (WhichTool == ESAN_CacheFrag) {
+    processCacheFragCompilationUnitExit(Ptr);
+  }
 }
 
 } // namespace __esan
