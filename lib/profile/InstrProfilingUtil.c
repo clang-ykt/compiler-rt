@@ -16,9 +16,7 @@
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
-#if defined(__linux__)
 #include <unistd.h>
-#endif
 #include <fcntl.h>
 #include <errno.h>
 #endif
@@ -67,7 +65,7 @@ void *lprofPtrFetchAdd(void **Mem, long ByteIncr) {
 #endif
 
 #ifdef COMPILER_RT_HAS_UNAME
-int lprofGetHostName(char *Name, int Len) {
+COMPILER_RT_VISIBILITY int lprofGetHostName(char *Name, int Len) {
   struct utsname N;
   int R;
   if (!(R = uname(&N)))
@@ -76,7 +74,7 @@ int lprofGetHostName(char *Name, int Len) {
 }
 #endif
 
-FILE *lprofOpenFileEx(const char *ProfileName) {
+COMPILER_RT_VISIBILITY FILE *lprofOpenFileEx(const char *ProfileName) {
   FILE *f;
   int fd;
 #ifdef COMPILER_RT_HAS_FCNTL_LCK
