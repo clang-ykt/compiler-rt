@@ -343,6 +343,9 @@ INTERFACE_FUNCTION(__sanitizer_unaligned_store16)
 INTERFACE_FUNCTION(__sanitizer_unaligned_store32)
 INTERFACE_FUNCTION(__sanitizer_unaligned_store64)
 INTERFACE_FUNCTION(__sanitizer_verify_contiguous_container)
+INTERFACE_FUNCTION(__sanitizer_install_malloc_and_free_hooks)
+INTERFACE_FUNCTION(__sanitizer_start_switch_fiber)
+INTERFACE_FUNCTION(__sanitizer_finish_switch_fiber)
 
 // TODO(timurrrr): Add more interface functions on the as-needed basis.
 
