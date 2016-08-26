@@ -1,14 +1,14 @@
 # CMake build for CompilerRT.
 #
 # This build assumes that CompilerRT is checked out into the
-# 'projects/compiler-rt' inside of an LLVM tree.
+# 'projects/compiler-rt' or 'runtimes/compiler-rt' inside of an LLVM tree.
 # Standalone build system for CompilerRT is not yet ready.
 #
 # An important constraint of the build is that it only produces libraries
 # based on the ability of the host toolchain to target various platforms.
 
 # Check if compiler-rt is built as a standalone project.
-if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR COMPILER_RT_STANDALONE_BUILD)
   project(CompilerRT C CXX ASM)
   set(COMPILER_RT_STANDALONE_BUILD TRUE)
 endif()
@@ -84,6 +84,19 @@ option(COMPILER_RT_EXTERNALIZE_DEBUGINFO
   "Generate dSYM files and strip executables and libraries (Darwin Only)" OFF)
 # COMPILER_RT_DEBUG_PYBOOL is used by lit.common.configured.in.
 pythonize_bool(COMPILER_RT_DEBUG)
+
+if(APPLE AND SANITIZER_MIN_OSX_VERSION VERSION_LESS "10.9")
+  # Mac OS X prior to 10.9 had problems with exporting symbols from
+  # libc++/libc++abi.
+  set(use_cxxabi_default OFF)
+elseif(MSVC)
+  set(use_cxxabi_default OFF)
+else()
+  set(use_cxxabi_default ON)
+endif()
+
+option(SANITIZER_CAN_USE_CXXABI "Sanitizers can use cxxabi" ${use_cxxabi_default})
+pythonize_bool(SANITIZER_CAN_USE_CXXABI)
 
 #================================
 # Setup Compiler Flags
@@ -203,17 +216,6 @@ append_list_if(COMPILER_RT_HAS_WD4800_FLAG /wd4800 SANITIZER_COMMON_CFLAGS)
 
 # Warnings to turn off for all libraries, not just sanitizers.
 append_string_if(COMPILER_RT_HAS_WUNUSED_PARAMETER_FLAG -Wno-unused-parameter CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
-
-if(APPLE AND SANITIZER_MIN_OSX_VERSION VERSION_LESS "10.9")
-  # Mac OS X prior to 10.9 had problems with exporting symbols from
-  # libc++/libc++abi.
-  set(SANITIZER_CAN_USE_CXXABI FALSE)
-elseif(MSVC)
-  set(SANITIZER_CAN_USE_CXXABI FALSE)
-else()
-  set(SANITIZER_CAN_USE_CXXABI TRUE)
-endif()
-pythonize_bool(SANITIZER_CAN_USE_CXXABI)
 
 add_subdirectory(include)
 
