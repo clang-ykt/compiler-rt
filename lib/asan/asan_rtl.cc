@@ -32,8 +32,8 @@
 #include "ubsan/ubsan_init.h"
 #include "ubsan/ubsan_platform.h"
 
+uptr __asan_shadow_memory_dynamic_address;  // Global interface symbol.
 int __asan_option_detect_stack_use_after_return;  // Global interface symbol.
-int __asan_option_detect_stack_use_after_scope;  // Global interface symbol.
 uptr *__asan_test_only_reported_buggy_pointer;  // Used only for testing asan.
 
 namespace __asan {
@@ -446,9 +446,6 @@ static void AsanInitInternal() {
   __asan_option_detect_stack_use_after_return =
       flags()->detect_stack_use_after_return;
 
-  __asan_option_detect_stack_use_after_scope =
-      flags()->detect_stack_use_after_scope;
-
   // Re-exec ourselves if we need to set additional env or command line args.
   MaybeReexec();
 
@@ -464,7 +461,20 @@ static void AsanInitInternal() {
 
   ReplaceSystemMalloc();
 
+  __asan_shadow_memory_dynamic_address = 0;
   uptr shadow_start = kLowShadowBeg;
+  if (shadow_start == 0) {
+    uptr granularity = GetMmapGranularity();
+    uptr alignment = 8 * granularity;
+    uptr left_padding = granularity;
+    uptr space_size = kHighShadowEnd + left_padding;
+
+    shadow_start = FindAvailableMemoryRange(space_size, alignment, granularity);
+    CHECK_NE((uptr)0, shadow_start);
+    CHECK(IsAligned(shadow_start, alignment));
+  }
+  __asan_shadow_memory_dynamic_address = shadow_start;
+
   if (kLowShadowBeg)
     shadow_start -= GetMmapGranularity();
   bool full_shadow_is_available =
@@ -475,12 +485,6 @@ static void AsanInitInternal() {
   if (!full_shadow_is_available) {
     kMidMemBeg = kLowMemEnd < 0x3000000000ULL ? 0x3000000000ULL : 0;
     kMidMemEnd = kLowMemEnd < 0x3000000000ULL ? 0x4fffffffffULL : 0;
-  }
-#elif SANITIZER_WINDOWS64
-  // Disable the "mid mem" shadow layout.
-  if (!full_shadow_is_available) {
-    kMidMemBeg = 0;
-    kMidMemEnd = 0;
   }
 #endif
 
@@ -652,6 +656,14 @@ void NOINLINE __asan_set_death_callback(void (*callback)(void)) {
 void __asan_init() {
   AsanActivate();
   AsanInitInternal();
+}
+
+// Called by a loaded DLL to initialize itself.
+void __asan_init_from_dll(int *detect_stack_use_after_return,
+                          uptr *shadow_memory_dynamic_address) {
+  __asan_init();
+  *detect_stack_use_after_return = __asan_option_detect_stack_use_after_return;
+  *shadow_memory_dynamic_address = __asan_shadow_memory_dynamic_address;
 }
 
 void __asan_version_mismatch_check() {

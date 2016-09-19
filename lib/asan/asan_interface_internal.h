@@ -23,11 +23,17 @@
 #include "asan_init_version.h"
 
 using __sanitizer::uptr;
+using __sanitizer::u64;
+using __sanitizer::u32;
 
 extern "C" {
   // This function should be called at the very beginning of the process,
   // before any instrumented code is executed and before any call to malloc.
   SANITIZER_INTERFACE_ATTRIBUTE void __asan_init();
+
+  // This function should be called by a loaded instrumented module.
+  SANITIZER_INTERFACE_ATTRIBUTE void __asan_init_from_dll(
+      int *detect_stack_use_after_return, uptr *shadow_memory_dynamic_address);
 
   // This function exists purely to get a linker/loader error when using
   // incompatible versions of instrumentation and runtime library. Please note
@@ -170,13 +176,12 @@ extern "C" {
   SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
   /* OPTIONAL */ const char* __asan_default_options();
 
+  SANITIZER_INTERFACE_ATTRIBUTE
+  extern uptr __asan_shadow_memory_dynamic_address;
+
   // Global flag, copy of ASAN_OPTIONS=detect_stack_use_after_return
   SANITIZER_INTERFACE_ATTRIBUTE
   extern int __asan_option_detect_stack_use_after_return;
-
-// Global flag, copy of ASAN_OPTIONS=detect_stack_use_after_scope
-  SANITIZER_INTERFACE_ATTRIBUTE
-  extern int __asan_option_detect_stack_use_after_scope;
 
   SANITIZER_INTERFACE_ATTRIBUTE
   extern uptr *__asan_test_only_reported_buggy_pointer;

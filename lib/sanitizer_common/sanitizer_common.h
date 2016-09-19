@@ -98,6 +98,9 @@ void *MmapAlignedOrDie(uptr size, uptr alignment, const char *mem_type);
 bool MprotectNoAccess(uptr addr, uptr size);
 bool MprotectReadOnly(uptr addr, uptr size);
 
+// Find an available address space.
+uptr FindAvailableMemoryRange(uptr size, uptr alignment, uptr left_padding);
+
 // Used to check if we can map shadow memory to a fixed location.
 bool MemoryRangeIsAvailable(uptr range_start, uptr range_end);
 void ReleaseMemoryToOS(uptr addr, uptr size);
@@ -396,7 +399,7 @@ void ReportErrorSummary(const char *error_message);
 //   error_type file:line[:column][ function]
 void ReportErrorSummary(const char *error_type, const AddressInfo &info);
 // Same as above, but obtains AddressInfo by symbolizing top stack trace frame.
-void ReportErrorSummary(const char *error_type, StackTrace *trace);
+void ReportErrorSummary(const char *error_type, const StackTrace *trace);
 
 // Math
 #if SANITIZER_WINDOWS && !defined(__clang__) && !defined(__GNUC__)
@@ -453,8 +456,8 @@ INLINE uptr RoundUpToPowerOfTwo(uptr size) {
   if (IsPowerOfTwo(size)) return size;
 
   uptr up = MostSignificantSetBitIndex(size);
-  CHECK(size < (1ULL << (up + 1)));
-  CHECK(size > (1ULL << up));
+  CHECK_LT(size, (1ULL << (up + 1)));
+  CHECK_GT(size, (1ULL << up));
   return 1ULL << (up + 1);
 }
 
@@ -834,16 +837,16 @@ void AvoidCVE_2016_2143();
 INLINE void AvoidCVE_2016_2143() {}
 #endif
 
+struct StackDepotStats {
+  uptr n_uniq_ids;
+  uptr allocated;
+};
+
 }  // namespace __sanitizer
 
 inline void *operator new(__sanitizer::operator_new_size_type size,
                           __sanitizer::LowLevelAllocator &alloc) {
   return alloc.Allocate(size);
 }
-
-struct StackDepotStats {
-  uptr n_uniq_ids;
-  uptr allocated;
-};
 
 #endif  // SANITIZER_COMMON_H

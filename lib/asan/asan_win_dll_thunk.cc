@@ -30,6 +30,8 @@ void *__stdcall GetProcAddress(void *module, const char *proc_name);
 void abort();
 }
 
+using namespace __sanitizer;
+
 static uptr getRealProcAddressOrDie(const char *name) {
   uptr ret =
       __interception::InternalGetProcAddress((void *)GetModuleHandleA(0), name);
@@ -197,27 +199,21 @@ static void InterceptHooks();
 // ----------------- ASan own interface functions --------------------
 // Don't use the INTERFACE_FUNCTION machinery for this function as we actually
 // want to call it in the __asan_init interceptor.
-WRAP_W_V(__asan_should_detect_stack_use_after_return)
-WRAP_W_V(__asan_should_detect_stack_use_after_scope)
-
 extern "C" {
   int __asan_option_detect_stack_use_after_return;
-  int __asan_option_detect_stack_use_after_scope;
+  uptr __asan_shadow_memory_dynamic_address;
 
   // Manually wrap __asan_init as we need to initialize
   // __asan_option_detect_stack_use_after_return afterwards.
   void __asan_init() {
-    typedef void (*fntype)();
+    typedef void (*fntype)(int*, uptr*);
     static fntype fn = 0;
     // __asan_init is expected to be called by only one thread.
     if (fn) return;
 
-    fn = (fntype)getRealProcAddressOrDie("__asan_init");
-    fn();
-    __asan_option_detect_stack_use_after_return =
-        (__asan_should_detect_stack_use_after_return() != 0);
-    __asan_option_detect_stack_use_after_scope =
-        (__asan_should_detect_stack_use_after_scope() != 0);
+    fn = (fntype)getRealProcAddressOrDie("__asan_init_from_dll");
+    fn(&__asan_option_detect_stack_use_after_return,
+       &__asan_shadow_memory_dynamic_address);
 
     InterceptHooks();
   }
@@ -322,12 +318,6 @@ INTERFACE_FUNCTION(__sanitizer_cov_init)
 INTERFACE_FUNCTION(__sanitizer_cov_module_init)
 INTERFACE_FUNCTION(__sanitizer_cov_trace_basic_block)
 INTERFACE_FUNCTION(__sanitizer_cov_trace_func_enter)
-INTERFACE_FUNCTION(__sanitizer_cov_trace_cmp)
-INTERFACE_FUNCTION(__sanitizer_cov_trace_cmp1)
-INTERFACE_FUNCTION(__sanitizer_cov_trace_cmp2)
-INTERFACE_FUNCTION(__sanitizer_cov_trace_cmp4)
-INTERFACE_FUNCTION(__sanitizer_cov_trace_cmp8)
-INTERFACE_FUNCTION(__sanitizer_cov_trace_switch)
 INTERFACE_FUNCTION(__sanitizer_cov_with_check)
 INTERFACE_FUNCTION(__sanitizer_get_allocated_size)
 INTERFACE_FUNCTION(__sanitizer_get_coverage_guards)
@@ -343,6 +333,7 @@ INTERFACE_FUNCTION(__sanitizer_get_unmapped_bytes)
 INTERFACE_FUNCTION(__sanitizer_maybe_open_cov_file)
 INTERFACE_FUNCTION(__sanitizer_print_stack_trace)
 INTERFACE_FUNCTION(__sanitizer_symbolize_pc)
+INTERFACE_FUNCTION(__sanitizer_symbolize_global)
 INTERFACE_FUNCTION(__sanitizer_ptr_cmp)
 INTERFACE_FUNCTION(__sanitizer_ptr_sub)
 INTERFACE_FUNCTION(__sanitizer_report_error_summary)
