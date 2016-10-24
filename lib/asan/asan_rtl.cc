@@ -32,6 +32,7 @@
 #include "ubsan/ubsan_init.h"
 #include "ubsan/ubsan_platform.h"
 
+uptr __asan_shadow_memory_dynamic_address;  // Global interface symbol.
 int __asan_option_detect_stack_use_after_return;  // Global interface symbol.
 uptr *__asan_test_only_reported_buggy_pointer;  // Used only for testing asan.
 
@@ -334,8 +335,21 @@ static void InitializeHighMemEnd() {
 }
 
 static void ProtectGap(uptr addr, uptr size) {
-  if (!flags()->protect_shadow_gap)
+  if (!flags()->protect_shadow_gap) {
+    // The shadow gap is unprotected, so there is a chance that someone
+    // is actually using this memory. Which means it needs a shadow...
+    uptr GapShadowBeg = RoundDownTo(MEM_TO_SHADOW(addr), GetPageSizeCached());
+    uptr GapShadowEnd =
+        RoundUpTo(MEM_TO_SHADOW(addr + size), GetPageSizeCached()) - 1;
+    if (Verbosity())
+      Printf("protect_shadow_gap=0:"
+             " not protecting shadow gap, allocating gap's shadow\n"
+             "|| `[%p, %p]` || ShadowGap's shadow ||\n", GapShadowBeg,
+             GapShadowEnd);
+    ReserveShadowMemoryRange(GapShadowBeg, GapShadowEnd,
+                             "unprotected gap shadow");
     return;
+  }
   void *res = MmapFixedNoAccess(addr, size, "shadow gap");
   if (addr == (uptr)res)
     return;
@@ -460,7 +474,30 @@ static void AsanInitInternal() {
 
   ReplaceSystemMalloc();
 
+  // Set the shadow memory address to uninitialized.
+  __asan_shadow_memory_dynamic_address = kDefaultShadowSentinel;
+
   uptr shadow_start = kLowShadowBeg;
+  // Detect if a dynamic shadow address must used and find a available location
+  // when necessary. When dynamic address is used, the macro |kLowShadowBeg|
+  // expands to |__asan_shadow_memory_dynamic_address| which is
+  // |kDefaultShadowSentinel|.
+  if (shadow_start == kDefaultShadowSentinel) {
+    __asan_shadow_memory_dynamic_address = 0;
+    CHECK_EQ(0, kLowShadowBeg);
+
+    uptr granularity = GetMmapGranularity();
+    uptr alignment = 8 * granularity;
+    uptr left_padding = granularity;
+    uptr space_size = kHighShadowEnd + left_padding;
+
+    shadow_start = FindAvailableMemoryRange(space_size, alignment, granularity);
+    CHECK_NE((uptr)0, shadow_start);
+    CHECK(IsAligned(shadow_start, alignment));
+  }
+  // Update the shadow memory address (potentially) used by instrumentation.
+  __asan_shadow_memory_dynamic_address = shadow_start;
+
   if (kLowShadowBeg)
     shadow_start -= GetMmapGranularity();
   bool full_shadow_is_available =
@@ -471,12 +508,6 @@ static void AsanInitInternal() {
   if (!full_shadow_is_available) {
     kMidMemBeg = kLowMemEnd < 0x3000000000ULL ? 0x3000000000ULL : 0;
     kMidMemEnd = kLowMemEnd < 0x3000000000ULL ? 0x4fffffffffULL : 0;
-  }
-#elif SANITIZER_WINDOWS64
-  // Disable the "mid mem" shadow layout.
-  if (!full_shadow_is_available) {
-    kMidMemBeg = 0;
-    kMidMemEnd = 0;
   }
 #endif
 
@@ -606,6 +637,9 @@ static AsanInitializer asan_initializer;
 using namespace __asan;  // NOLINT
 
 void NOINLINE __asan_handle_no_return() {
+  if (asan_init_is_running)
+    return;
+
   int local_stack;
   AsanThread *curr_thread = GetCurrentThread();
   uptr PageSize = GetPageSizeCached();

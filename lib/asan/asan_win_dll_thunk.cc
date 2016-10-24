@@ -200,9 +200,11 @@ static void InterceptHooks();
 // Don't use the INTERFACE_FUNCTION machinery for this function as we actually
 // want to call it in the __asan_init interceptor.
 WRAP_W_V(__asan_should_detect_stack_use_after_return)
+WRAP_W_V(__asan_get_shadow_memory_dynamic_address)
 
 extern "C" {
   int __asan_option_detect_stack_use_after_return;
+  uptr __asan_shadow_memory_dynamic_address;
 
   // Manually wrap __asan_init as we need to initialize
   // __asan_option_detect_stack_use_after_return afterwards.
@@ -216,7 +218,8 @@ extern "C" {
     fn();
     __asan_option_detect_stack_use_after_return =
         (__asan_should_detect_stack_use_after_return() != 0);
-
+    __asan_shadow_memory_dynamic_address =
+        (uptr)__asan_get_shadow_memory_dynamic_address();
     InterceptHooks();
   }
 }
@@ -323,7 +326,6 @@ INTERFACE_FUNCTION(__sanitizer_cov_trace_func_enter)
 INTERFACE_FUNCTION(__sanitizer_cov_with_check)
 INTERFACE_FUNCTION(__sanitizer_get_allocated_size)
 INTERFACE_FUNCTION(__sanitizer_get_coverage_guards)
-INTERFACE_FUNCTION(__sanitizer_get_coverage_pc_buffer_pos)
 INTERFACE_FUNCTION(__sanitizer_get_current_allocated_bytes)
 INTERFACE_FUNCTION(__sanitizer_get_estimated_allocated_size)
 INTERFACE_FUNCTION(__sanitizer_get_free_bytes)
@@ -343,7 +345,6 @@ INTERFACE_FUNCTION(__sanitizer_reset_coverage)
 INTERFACE_FUNCTION(__sanitizer_get_number_of_counters)
 INTERFACE_FUNCTION(__sanitizer_update_counter_bitset_and_clear_counters)
 INTERFACE_FUNCTION(__sanitizer_sandbox_on_notify)
-INTERFACE_FUNCTION(__sanitizer_set_coverage_pc_buffer)
 INTERFACE_FUNCTION(__sanitizer_set_death_callback)
 INTERFACE_FUNCTION(__sanitizer_set_report_path)
 INTERFACE_FUNCTION(__sanitizer_set_report_fd)
@@ -378,6 +379,7 @@ WRAP_W_WW(realloc)
 WRAP_W_WW(_realloc_base)
 WRAP_W_WWW(_realloc_dbg)
 WRAP_W_WWW(_recalloc)
+WRAP_W_WWW(_recalloc_base)
 
 WRAP_W_W(_msize)
 WRAP_W_W(_expand)
