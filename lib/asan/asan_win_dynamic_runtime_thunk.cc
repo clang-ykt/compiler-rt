@@ -28,10 +28,12 @@
 #include <windows.h>
 
 // First, declare CRT sections we'll be using in this file
+#pragma section(".CRT$XIB", long, read)  // NOLINT
 #pragma section(".CRT$XID", long, read)  // NOLINT
 #pragma section(".CRT$XCAB", long, read)  // NOLINT
 #pragma section(".CRT$XTW", long, read)  // NOLINT
 #pragma section(".CRT$XTY", long, read)  // NOLINT
+#pragma section(".CRT$XLAB", long, read)  // NOLINT
 
 ////////////////////////////////////////////////////////////////////////////////
 // Define a copy of __asan_option_detect_stack_use_after_return that should be
@@ -46,13 +48,32 @@
 // after initialization anyways.
 extern "C" {
 __declspec(dllimport) int __asan_should_detect_stack_use_after_return();
-int __asan_option_detect_stack_use_after_return =
-    __asan_should_detect_stack_use_after_return();
+int __asan_option_detect_stack_use_after_return;
 
 __declspec(dllimport) void* __asan_get_shadow_memory_dynamic_address();
-void* __asan_shadow_memory_dynamic_address =
-    __asan_get_shadow_memory_dynamic_address();
+void* __asan_shadow_memory_dynamic_address;
 }
+
+static int InitializeClonedVariables() {
+  __asan_option_detect_stack_use_after_return =
+    __asan_should_detect_stack_use_after_return();
+  __asan_shadow_memory_dynamic_address =
+    __asan_get_shadow_memory_dynamic_address();
+  return 0;
+}
+
+static void NTAPI asan_thread_init(void *mod, unsigned long reason,
+    void *reserved) {
+  if (reason == DLL_PROCESS_ATTACH) InitializeClonedVariables();
+}
+
+// Our cloned variables must be initialized before C/C++ constructors.  If TLS
+// is used, our .CRT$XLAB initializer will run first. If not, our .CRT$XIB
+// initializer is needed as a backup.
+__declspec(allocate(".CRT$XIB")) int (*__asan_initialize_cloned_variables)() =
+    InitializeClonedVariables;
+__declspec(allocate(".CRT$XLAB")) void (NTAPI *__asan_tls_init)(void *,
+    unsigned long, void *) = asan_thread_init;
 
 ////////////////////////////////////////////////////////////////////////////////
 // For some reason, the MD CRT doesn't call the C/C++ terminators during on DLL
