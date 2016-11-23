@@ -19,6 +19,7 @@
 
 #include <stdlib.h>
 
+#include "asan_globals_win.h"
 #include "asan_interceptors.h"
 #include "asan_internal.h"
 #include "asan_report.h"
@@ -293,17 +294,25 @@ const char *DescribeSignalOrException(int signo) {
   return nullptr;
 }
 
-static long WINAPI SEHHandler(EXCEPTION_POINTERS *info) {
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE
+long __asan_unhandled_exception_filter(EXCEPTION_POINTERS *info) {
   EXCEPTION_RECORD *exception_record = info->ExceptionRecord;
   CONTEXT *context = info->ContextRecord;
 
-  if (ShouldReportDeadlyException(exception_record->ExceptionCode)) {
-    SignalContext sig = SignalContext::Create(exception_record, context);
-    ReportDeadlySignal(exception_record->ExceptionCode, sig);
-  }
-
+  // Continue the search if the signal wasn't deadly.
+  if (!ShouldReportDeadlyException(exception_record->ExceptionCode))
+    return EXCEPTION_CONTINUE_SEARCH;
   // FIXME: Handle EXCEPTION_STACK_OVERFLOW here.
 
+  SignalContext sig = SignalContext::Create(exception_record, context);
+  ReportDeadlySignal(exception_record->ExceptionCode, sig);
+  UNREACHABLE("returned from reporting deadly signal");
+}
+
+static long WINAPI SEHHandler(EXCEPTION_POINTERS *info) {
+  __asan_unhandled_exception_filter(info);
+
+  // Bubble out to the default exception filter.
   return default_seh_handler(info);
 }
 
@@ -359,8 +368,9 @@ __declspec(allocate(".CRT$XLAB")) void (NTAPI *__asan_tls_init)(void *,
     unsigned long, void *) = asan_thread_init;
 #endif
 
+ASAN_LINK_GLOBALS_WIN()
 
 // }}}
 }  // namespace __asan
 
-#endif  // _WIN32
+#endif  // SANITIZER_WINDOWS

@@ -45,6 +45,7 @@ extern "C" void __tsan_resume() {
 namespace __tsan {
 
 #if !SANITIZER_GO && !SANITIZER_MAC
+__attribute__((tls_model("initial-exec")))
 THREADLOCAL char cur_thread_placeholder[sizeof(ThreadState)] ALIGNED(64);
 #endif
 static char ctx_placeholder[sizeof(Context)] ALIGNED(64);
@@ -1001,6 +1002,14 @@ void ThreadIgnoreEnd(ThreadState *thr, uptr pc) {
 #endif
   }
 }
+
+#if !SANITIZER_GO
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE
+uptr __tsan_testonly_shadow_stack_current_size() {
+  ThreadState *thr = cur_thread();
+  return thr->shadow_stack_pos - thr->shadow_stack;
+}
+#endif
 
 void ThreadIgnoreSyncBegin(ThreadState *thr, uptr pc) {
   DPrintf("#%d: ThreadIgnoreSyncBegin\n", thr->tid);
