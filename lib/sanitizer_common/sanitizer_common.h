@@ -103,7 +103,9 @@ uptr FindAvailableMemoryRange(uptr size, uptr alignment, uptr left_padding);
 
 // Used to check if we can map shadow memory to a fixed location.
 bool MemoryRangeIsAvailable(uptr range_start, uptr range_end);
-void ReleaseMemoryToOS(uptr addr, uptr size);
+// Releases memory pages entirely within the [beg, end] address range. Noop if
+// the provided range does not contain at least one entire page.
+void ReleaseMemoryPagesToOS(uptr beg, uptr end);
 void IncreaseTotalMmap(uptr size);
 void DecreaseTotalMmap(uptr size);
 uptr GetRSS();
@@ -374,12 +376,6 @@ void SetCheckFailedCallback(CheckFailedCallbackType callback);
 // (exceeded==false).
 // The callback should be registered once at the tool init time.
 void SetSoftRssLimitExceededCallback(void (*Callback)(bool exceeded));
-
-// Callback to be called when we want to try releasing unused allocator memory
-// back to the OS.
-typedef void (*AllocatorReleaseToOSCallback)();
-// The callback should be registered once at the tool init time.
-void SetAllocatorReleaseToOSCallback(AllocatorReleaseToOSCallback Callback);
 
 // Functions related to signal handling.
 typedef void (*SignalHandlerType)(int, void *, void *);
@@ -798,6 +794,8 @@ struct SignalContext {
         is_memory_access(is_memory_access),
         write_flag(write_flag) {}
 
+  static void DumpAllRegisters(void *context);
+
   // Creates signal context in a platform-specific manner.
   static SignalContext Create(void *siginfo, void *context);
 
@@ -840,6 +838,10 @@ struct StackDepotStats {
   uptr n_uniq_ids;
   uptr allocated;
 };
+
+// The default value for allocator_release_to_os_interval_ms common flag to
+// indicate that sanitizer allocator should not attempt to release memory to OS.
+const s32 kReleaseToOSIntervalNever = -1;
 
 }  // namespace __sanitizer
 

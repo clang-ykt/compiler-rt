@@ -234,8 +234,7 @@ bool MprotectNoAccess(uptr addr, uptr size) {
   return VirtualProtect((LPVOID)addr, size, PAGE_NOACCESS, &old_protection);
 }
 
-
-void ReleaseMemoryToOS(uptr addr, uptr size) {
+void ReleaseMemoryPagesToOS(uptr beg, uptr end) {
   // This is almost useless on 32-bits.
   // FIXME: add madvise-analog when we move to 64-bits.
 }
@@ -870,6 +869,10 @@ SignalContext SignalContext::Create(void *siginfo, void *context) {
   bool is_memory_access = write_flag != SignalContext::UNKNOWN;
   return SignalContext(context, access_addr, pc, sp, bp, is_memory_access,
                        write_flag);
+}
+
+void SignalContext::DumpAllRegisters(void *context) {
+  // FIXME: Implement this.
 }
 
 uptr ReadBinaryName(/*out*/char *buf, uptr buf_len) {
