@@ -25,6 +25,22 @@
 
 #include <cstring>
 
+// Hardware CRC32 is supported at compilation via the following:
+// - for i386 & x86_64: -msse4.2
+// - for ARM & AArch64: -march=armv8-a+crc
+// An additional check must be performed at runtime as well to make sure the
+// emitted instructions are valid on the target host.
+#if defined(__SSE4_2__) || defined(__ARM_FEATURE_CRC32)
+# ifdef __SSE4_2__
+#  include <smmintrin.h>
+#  define HW_CRC32 FIRST_32_SECOND_64(_mm_crc32_u32, _mm_crc32_u64)
+# endif
+# ifdef __ARM_FEATURE_CRC32
+#  include <arm_acle.h>
+#  define HW_CRC32 FIRST_32_SECOND_64(__crc32cw, __crc32cd)
+# endif
+#endif
+
 namespace __scudo {
 
 #if SANITIZER_CAN_USE_ALLOCATOR64
@@ -75,22 +91,6 @@ enum : u8 {
 // We default to software CRC32 if the alternatives are not supported, either
 // at compilation or at runtime.
 static atomic_uint8_t HashAlgorithm = { CRC32Software };
-
-// Hardware CRC32 is supported at compilation via the following:
-// - for i386 & x86_64: -msse4.2
-// - for ARM & AArch64: -march=armv8-a+crc
-// An additional check must be performed at runtime as well to make sure the
-// emitted instructions are valid on the target host.
-#if defined(__SSE4_2__) || defined(__ARM_FEATURE_CRC32)
-# ifdef __SSE4_2__
-#  include <smmintrin.h>
-#  define HW_CRC32 FIRST_32_SECOND_64(_mm_crc32_u32, _mm_crc32_u64)
-# endif
-# ifdef __ARM_FEATURE_CRC32
-#  include <arm_acle.h>
-#  define HW_CRC32 FIRST_32_SECOND_64(__crc32cw, __crc32cd)
-# endif
-#endif
 
 // Helper function that will compute the chunk checksum, being passed all the
 // the needed information as uptrs. It will opt for the hardware version of
@@ -402,12 +402,18 @@ struct Allocator {
       Size = 1;
     if (Size >= MaxAllowedMallocSize)
       return BackendAllocator.ReturnNullOrDieOnBadRequest();
-    uptr RoundedSize = RoundUpTo(Size, MinAlignment);
-    uptr NeededSize = RoundedSize + AlignedChunkHeaderSize;
+
+    uptr NeededSize = RoundUpTo(Size, MinAlignment) + AlignedChunkHeaderSize;
     if (Alignment > MinAlignment)
       NeededSize += Alignment;
     if (NeededSize >= MaxAllowedMallocSize)
       return BackendAllocator.ReturnNullOrDieOnBadRequest();
+
+    // Primary backed and Secondary backed allocations have a different
+    // treatment. We deal with alignment requirements of Primary serviced
+    // allocations here, but the Secondary will take care of its own alignment
+    // needs, which means we also have to work around some limitations of the
+    // combined allocator to accommodate the situation.
     bool FromPrimary = PrimaryAllocator::CanAllocate(NeededSize, MinAlignment);
 
     void *Ptr;
@@ -426,8 +432,11 @@ struct Allocator {
     // If the allocation was serviced by the secondary, the returned pointer
     // accounts for ChunkHeaderSize to pass the alignment check of the combined
     // allocator. Adjust it here.
-    if (!FromPrimary)
+    if (!FromPrimary) {
       AllocBeg -= AlignedChunkHeaderSize;
+      if (Alignment > MinAlignment)
+        NeededSize -= Alignment;
+    }
 
     uptr ActuallyAllocatedSize = BackendAllocator.GetActuallyAllocatedSize(
         reinterpret_cast<void *>(AllocBeg));
